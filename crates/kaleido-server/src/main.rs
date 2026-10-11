@@ -67,6 +67,8 @@ pub(crate) use routes_embed::embeddings_openai;
 /// Upstream `defaultStoryAgentPrompt` (v0.9.2 useSettingsStore) — DM/跑团 system base.
 mod crawler;
 mod chat_shelf;
+// [主动关怀 P2 2026-10-11, 吞噬自 AIcove] 调度器 + 手动 API + 发火落库
+mod proactive;
 // 剧本转换流水线第一步：角色蒸馏（LLM + 向量检索）
 mod convert;
 // t4-agent-tools (S5-W1): read/list/write/bash under data_root jail
@@ -554,6 +556,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     chat_shelf::spawn_schedule_tick(state.clone());
+    // [主动关怀 P2] 主动消息调度器（60s 扫描，见 crates/kaleido-server/src/proactive.rs）
+    proactive::spawn_scheduler(state.clone());
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

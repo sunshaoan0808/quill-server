@@ -718,6 +718,8 @@ pub(crate) struct StopPayload {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        // [主动关怀 P2 2026-10-11] 显式提醒创建/列表/取消（调度器在 main 启动期拉起）
+        .merge(crate::proactive::router())
         .route(
             "/api/v1/story-tavern/packs",
             get(list_packs).post(upsert_pack),

@@ -55,9 +55,20 @@ ProactiveTrigger {
 
 ## 6. 阶段划分(按 SOP 小步)
 
-- P1:core 触发器模型 + store + 单测(纯函数,零接线)。
-- P2:server 调度器 + 发火落库 + SSE(先只有 high/显式提醒路径,手动 API 创建)。
-- P3:medium/low 管家分析 + 作废规则 + 夜间静默 + 冷却。
+- ✅ P1(2026-10-11):core 触发器模型 + store + 单测(纯函数,零接线)。
+- ✅ P2(2026-10-11 第三轮):server 调度器 + 发火落库 + 手动 API。
+  - `crates/kaleido-server/src/proactive.rs`(新模块):
+    `POST/GET /api/v1/story-tavern/sessions/{id}/proactive`、
+    `DELETE .../proactive/{trigger_id}`(high 优先级显式提醒,create 时锚点取
+    最后一条 user 消息 id);`spawn_scheduler`(main 启动拉起,45s 冷启动 + 60s 扫描)。
+  - 发火:`cachedContent` 优先,否则 `call_llm_nonstream` 角色化生成;LLM 失败
+    fireAt 顺延 5 分钟有界重试。落库走 `update_session` CAS 原子写(ADR-0004),
+    协议块按回合 P2 同口径剥离落 `mvuBlocks`。
+  - 审计:`$KALEIDO_DATA/audit/proactive.log`(create/fire/expire/cancel)。
+  - v2 缺口(记入 P3):SSE 推送(StreamHub 是 run_id 键,无常驻会话通道,消息
+    以落库为准)、medium/low 管家自动分析、冷却期、在线探测(v1 恒 false,low 仅
+    靠锚点作废)。
+- P3:medium/low 管家分析 + 冷却期 + SSE 推送。
 - P4:对话工具 `create_reminder`(接入现有 tool 通道)。
 
 ## 7. 验收
