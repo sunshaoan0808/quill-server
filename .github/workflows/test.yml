@@ -1,0 +1,116 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # 与 release-build.yml 一致：cargo 输出带颜色
+  CARGO_TERM_COLOR: always
+
+# 测试门禁只读仓库即可（release-build.yml 需要 contents: write 上传 Release 产物，这里不需要）
+permissions:
+  contents: read
+
+jobs:
+  # Job 1: Rust 工作区全量测试（kaleido-core / kaleido-server / kaleido-harness）。
+  # GitHub 托管 ubuntu-latest 上 fastembed→ort-sys 走 Linux 预编译二进制，
+  # 不需要任何 ort/load-dynamic 环境变量（那是 windows-gnu 本地专用 workaround，禁止带入 CI）。
+  # server 测试不依赖网络/LLM。
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # 与 release-build.yml 相同的 dtolnay/rust-toolchain 风格；门禁跑 stable
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      # 与 release-build.yml 相同的 cargo 缓存模式
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+
+      # R4 依赖锁定快检：Cargo.lock 与 Cargo.toml 一致性（漂移/手改 lock 时立即失败，
+      # 早于完整测试构建，秒级反馈；与下方 cargo test --locked 双保险）。
+      - name: Check Cargo.lock consistency
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      # --locked：Cargo.lock 已入库，依赖漂移时直接失败，保证 CI 与本地一致
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+
+  # Job 2: 前端构建 + UI 初始化守卫。与 rust job 无依赖，并行执行。
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npm run build = vite build + node scripts/stamp-html.mjs（产出 web/assets 产物）
+      - name: Build frontend
+        run: npm run build
+
+      # 必须在 build 之后：脚本扫描 src/js 递归初始化器，并校验 web/assets/app.js 产物
+      - name: Check UI initializers
+        run: node scripts/check-ui-init.mjs
+
+      # R9 前端工程化：eslint correctness 门禁 + vitest（SSE 解析契约等）
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
+  # Job 3: Python 语法编译检查（scripts/ 与 tests/ 的 e2e 只做 compileall，
+  # 不实际运行——e2e 需要活的服务器，不接入 CI）。
+  scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile-check python scripts and tests
+        run: python -m compileall -q scripts tests
+
+      # R7 依赖方向机器化：turn/protocol 部件不得反向依赖 entry、叶子模块
+      # 不得引用兄弟模块、pre_refine 与 post_parse 互不引用（纯 grep 断言）。
+      - name: Check dependency direction
+        run: python scripts/check-dep-direction.py
+
+  # Job 4 (R4 2026-10-06): 依赖漏洞审计 —— cargo audit 扫描 RustSec advisory 数据库。
+  # 只审计不修复：发现已知漏洞/警告（vulnerabilities 默认失败，warnings 仅报告）即红。
+  # 允许清单（如确有误报/暂无升级方案）通过 audit.toml 记录，见 https://github.com/rustsec/rustsec/tree/main/cargo-audit
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit
