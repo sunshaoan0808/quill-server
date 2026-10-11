@@ -47,48 +47,153 @@ pub fn parse_regex_from_string(input: &str) -> Option<regex::Regex> {
     builder.build().ok()
 }
 
-pub(crate) fn transform_case(s: &str, case_sensitive: bool) -> String {
-    if case_sensitive {
-        s.to_string()
-    } else {
-        s.to_lowercase()
-    }
+/// R8 性能优化（2026-10-07）：匹配层改为预变换变体 ——
+/// 旧实现每个 key 都把整个扫描缓冲 lowercase 一次 + whole-word 路径每 key
+/// 现场编译正则；现在缓冲按 depth 缓存一份小写副本、词边界用字符级判定、
+/// regex 键编译结果按趟缓存。行为与旧实现逐分支等价（regex 键仍对原文匹配）。
+
+pub(crate) fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
-pub(crate) fn match_keys(haystack: &str, needle: &str, entry: &WiEntry, settings: &WiSettings) -> bool {
-    let needle = needle.trim();
+/// `(?:^|\W)(needle)(?:$|\W)` 的字符级等价实现（needle 为字面量，非正则）。
+pub(crate) fn whole_word_contains(hay: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return false;
     }
-    if let Some(re) = parse_regex_from_string(needle) {
-        return re.is_match(haystack);
+    let mut start = 0usize;
+    while let Some(rel) = hay[start..].find(needle) {
+        let abs = start + rel;
+        let before_ok =
+            abs == 0 || !hay[..abs].chars().next_back().map(is_word_char).unwrap_or(false);
+        let after = abs + needle.len();
+        let after_ok =
+            after >= hay.len() || !hay[after..].chars().next().map(is_word_char).unwrap_or(false);
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs + needle.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        if start >= hay.len() {
+            break;
+        }
+    }
+    false
+}
+
+/// 预变换匹配：`raw` 原文、`lower` 其小写副本（调用方按 depth 缓存），
+/// regex 键对原文匹配（与旧实现一致），plain 键按大小写语义选择文本。
+pub(crate) fn match_keys_pre(
+    raw: &str,
+    lower: &str,
+    key: &str,
+    entry: &WiEntry,
+    settings: &WiSettings,
+    regex_cache: &mut HashMap<String, Option<regex::Regex>>,
+) -> bool {
+    let needle = key.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    let re_opt: Option<&regex::Regex> = if let Some(cached) = regex_cache.get(needle) {
+        cached.as_ref()
+    } else {
+        let parsed = parse_regex_from_string(needle);
+        regex_cache.insert(needle.to_string(), parsed);
+        regex_cache.get(needle).and_then(|c| c.as_ref())
+    };
+    if let Some(re) = re_opt {
+        return re.is_match(raw);
     }
     let case_sensitive = entry.case_sensitive.unwrap_or(settings.case_sensitive);
-    let match_whole = entry
-        .match_whole_words
-        .unwrap_or(settings.match_whole_words);
-    let hay = transform_case(haystack, case_sensitive);
-    let neo = transform_case(needle, case_sensitive);
-    if match_whole {
-        let words: Vec<&str> = neo.split_whitespace().collect();
-        if words.len() > 1 {
-            hay.contains(&neo)
+    let match_whole = entry.match_whole_words.unwrap_or(settings.match_whole_words);
+    if case_sensitive {
+        if match_whole {
+            whole_word_contains(raw, needle)
         } else {
-            // (?:^|\W)(needle)(?:$|\W)
-            let re = regex::RegexBuilder::new(&format!(
-                r"(?:^|\W)({})(?:$|\W)",
-                regex::escape(&neo)
-            ))
-            .case_insensitive(false)
-            .build();
-            match re {
-                Ok(r) => r.is_match(&hay),
-                Err(_) => hay.contains(&neo),
-            }
+            raw.contains(needle)
         }
     } else {
-        hay.contains(&neo)
+        let neo = needle.to_lowercase();
+        if match_whole {
+            let words: Vec<&str> = neo.split_whitespace().collect();
+            if words.len() > 1 {
+                lower.contains(&neo)
+            } else {
+                whole_word_contains(lower, &neo)
+            }
+        } else {
+            lower.contains(&neo)
+        }
     }
+}
+
+pub(crate) fn primary_match_pre(
+    entry: &WiEntry,
+    raw: &str,
+    lower: &str,
+    settings: &WiSettings,
+    regex_cache: &mut HashMap<String, Option<regex::Regex>>,
+) -> Option<String> {
+    for key in &entry.keys {
+        if match_keys_pre(raw, lower, key, entry, settings, regex_cache) {
+            return Some(key.clone());
+        }
+    }
+    None
+}
+
+pub(crate) fn secondary_match_pre(
+    entry: &WiEntry,
+    raw: &str,
+    lower: &str,
+    settings: &WiSettings,
+    regex_cache: &mut HashMap<String, Option<regex::Regex>>,
+) -> bool {
+    if !entry.selective || entry.keysecondary.is_empty() {
+        return true;
+    }
+    let mut any = false;
+    let mut all = true;
+    for key in &entry.keysecondary {
+        let m = match_keys_pre(raw, lower, key, entry, settings, regex_cache);
+        if m {
+            any = true;
+        } else {
+            all = false;
+        }
+        match entry.selective_logic {
+            SelectiveLogic::AndAny if m => return true,
+            SelectiveLogic::NotAll if !m => return true,
+            _ => {}
+        }
+    }
+    match entry.selective_logic {
+        SelectiveLogic::NotAny => !any,
+        SelectiveLogic::AndAll => all,
+        SelectiveLogic::AndAny => any,
+        SelectiveLogic::NotAll => !all,
+    }
+}
+
+pub(crate) fn score_entry_pre(
+    entry: &WiEntry,
+    raw: &str,
+    lower: &str,
+    settings: &WiSettings,
+    regex_cache: &mut HashMap<String, Option<regex::Regex>>,
+) -> i32 {
+    let mut score = 0;
+    for k in &entry.keys {
+        if match_keys_pre(raw, lower, k, entry, settings, regex_cache) {
+            score += 1;
+        }
+    }
+    for k in &entry.keysecondary {
+        if match_keys_pre(raw, lower, k, entry, settings, regex_cache) {
+            score += 1;
+        }
+    }
+    score
 }
 
 pub(crate) fn estimate_tokens_mode(s: &str, mode: &str) -> i32 {
@@ -129,62 +234,9 @@ pub(crate) fn buffer_text(depth_buf: &[String], depth: i32, recurse: &[String]) 
     parts.join("\n")
 }
 
-pub(crate) fn primary_match(
-    entry: &WiEntry,
-    text: &str,
-    settings: &WiSettings,
-) -> Option<String> {
-    for key in &entry.keys {
-        if match_keys(text, key, entry, settings) {
-            return Some(key.clone());
-        }
-    }
-    None
-}
-
-pub(crate) fn secondary_match(entry: &WiEntry, text: &str, settings: &WiSettings) -> bool {
-    if !entry.selective || entry.keysecondary.is_empty() {
-        return true;
-    }
-    let mut any = false;
-    let mut all = true;
-    for key in &entry.keysecondary {
-        let m = match_keys(text, key, entry, settings);
-        if m {
-            any = true;
-        } else {
-            all = false;
-        }
-        match entry.selective_logic {
-            SelectiveLogic::AndAny if m => return true,
-            SelectiveLogic::NotAll if !m => return true,
-            _ => {}
-        }
-    }
-    match entry.selective_logic {
-        SelectiveLogic::NotAny => !any,
-        SelectiveLogic::AndAll => all,
-        SelectiveLogic::AndAny => any,
-        SelectiveLogic::NotAll => !all,
-    }
-}
-
-pub(crate) fn score_entry(entry: &WiEntry, text: &str, settings: &WiSettings) -> i32 {
-    let mut score = 0;
-    for k in &entry.keys {
-        if match_keys(text, k, entry, settings) {
-            score += 1;
-        }
-    }
-    for k in &entry.keysecondary {
-        if match_keys(text, k, entry, settings) {
-            score += 1;
-        }
-    }
-    score
-}
-
 /// Core ST-compatible scan.
+
+
 pub fn check_world_info(
     entries: &[WiEntry],
     chat_newest_first: &[String],

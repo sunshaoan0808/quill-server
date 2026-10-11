@@ -139,6 +139,12 @@ pub fn check_world_info_timed(
         }
         loop_count += 1;
         let mut activated_now: Vec<(WiEntry, String)> = Vec::new();
+        // [R8 2026-10-07] 每趟缓存：depth→小写缓冲（避免每 key 全缓冲 lowercase）+
+        // regex 键编译缓存（避免每 key 现场编译）。
+        let mut lower_cache: std::collections::HashMap<i32, std::rc::Rc<String>> =
+            std::collections::HashMap::new();
+        let mut regex_cache: std::collections::HashMap<String, Option<regex::Regex>> =
+            std::collections::HashMap::new();
 
         for entry in &sorted {
             let key = format!("{}.{}", entry.world, entry.uid);
@@ -158,6 +164,14 @@ pub fn check_world_info_timed(
                 .unwrap_or(settings.depth + depth_skew)
                 .max(0);
             let text = buffer_text(chat_newest_first, depth, &recurse_buf);
+            let text_lower: std::rc::Rc<String> = match lower_cache.get(&depth) {
+                Some(v) => v.clone(),
+                None => {
+                    let v = std::rc::Rc::new(text.to_lowercase());
+                    lower_cache.insert(depth, v.clone());
+                    v
+                }
+            };
 
             let ekey = TimedWorldInfo::entry_key(&entry.world, &entry.uid);
             if delay_active.contains(&ekey) {
@@ -250,10 +264,11 @@ pub fn check_world_info_timed(
                 .iter()
                 .map(|k| substitute_params(k, &ctx))
                 .collect();
-            let Some(pk) = primary_match(&entry_sub, &text, settings) else {
+            let Some(pk) = primary_match_pre(&entry_sub, &text, &text_lower, settings, &mut regex_cache)
+            else {
                 continue;
             };
-            if !secondary_match(&entry_sub, &text, settings) {
+            if !secondary_match_pre(&entry_sub, &text, &text_lower, settings, &mut regex_cache) {
                 continue;
             }
             entry_sub.content = substitute_params(&entry.content, &ctx);
@@ -683,9 +698,20 @@ pub(crate) fn filter_inclusion_groups(
         if use_score {
             let depth = settings.depth + depth_skew;
             let text = buffer_text(chat, depth, recurse);
+            let text_lower = text.to_lowercase();
+            let mut regex_cache: std::collections::HashMap<String, Option<regex::Regex>> =
+                std::collections::HashMap::new();
             let scores: Vec<i32> = idxs
                 .iter()
-                .map(|&i| score_entry(&activated_now[i].0, &text, settings))
+                .map(|&i| {
+                    score_entry_pre(
+                        &activated_now[i].0,
+                        &text,
+                        &text_lower,
+                        settings,
+                        &mut regex_cache,
+                    )
+                })
                 .collect();
             let max = scores.iter().copied().max().unwrap_or(0);
             for (k, &i) in idxs.iter().enumerate() {
