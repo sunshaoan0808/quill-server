@@ -1183,6 +1183,8 @@ pub fn is_mvu_active(lore_entries: &[Value], message_blocks: &[String]) -> bool 
 /// 基线（`[InitVar]` 条目）+ 沿落盘消息链顺序重放更新块 → 当前 stat_data。
 /// 每轮请求构建一次、请求内固定（对齐 AIcove"每轮一次快照"语义；ADR-0004
 /// 真相源：快照永远可由 `[InitVar]` + 落盘消息链重建）。
+/// 块形态：P2 落盘的是已剥标签的裸块体（`extract_update_blocks` 产物）；
+/// 对仍带 `<UpdateVariable>` 包裹的输入同样容忍（防御）。
 /// 已知 v1 缺口：开场白 `<initvar>` 覆盖、prev_anchor/raw_hash 增量缓存未做。
 pub fn snapshot_stat_data(lore_entries: &[Value], message_blocks: &[String]) -> MvuInitResult {
     let sources = init_sources_from_lore_entries(lore_entries);
@@ -1190,7 +1192,14 @@ pub fn snapshot_stat_data(lore_entries: &[Value], message_blocks: &[String]) -> 
     for b in message_blocks {
         // 重放沿用逐条跳过+诊断语义；此处诊断不影响主链路（init_from_entries 的
         // 诊断已含在返回值里，调用方需要时可记日志）
-        let _ = apply_update_block(&mut r.stat_data, b);
+        let bodies = extract_update_blocks(b);
+        if bodies.is_empty() {
+            let _ = apply_update_block(&mut r.stat_data, b);
+        } else {
+            for body in bodies {
+                let _ = apply_update_block(&mut r.stat_data, &body);
+            }
+        }
     }
     r
 }
@@ -1608,7 +1617,7 @@ mod tests {
         let stat = json!({"角色": {"好感度": 42}});
         let p = "前文 {{get_message_variable::角色.好感度}} 中 {{GET_MESSAGE_VARIABLE::角色}} 尾";
         let out = expand_variable_macros(p, &stat);
-        assert_eq!(out, "前文 42 中 {\"角色\":{\"好感度\":42}} 尾");
+        assert_eq!(out, "前文 42 中 {\"好感度\":42} 尾");
 
         // 非 MVU 宏原样保留
         let p2 = "{{char}} 与 {{get_message_variable::不存在}}";
