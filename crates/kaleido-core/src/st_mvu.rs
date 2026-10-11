@@ -900,7 +900,8 @@ pub struct MvuInitResult {
 }
 
 fn is_initvar_entry(name: &str) -> bool {
-    name.to_uppercase().contains("[INITVAR]")
+    // 零分配 ASCII 大小写不敏感匹配（find_tag_blocks 同款），热路径友好
+    find_ci(name, "[initvar]").is_some()
 }
 
 /// 从世界书条目构建 stat_data 基线：识别名字含 `[InitVar]` 的条目，
@@ -1136,6 +1137,110 @@ pub fn format_variable_json(stat_data: &Value, path: &str) -> String {
         Some(v) => serde_json::to_string(&strip_meta_keys(v)).unwrap_or_else(|_| "null".into()),
         None => "null".into(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// [P3 2026-10-11] 会话快照重放 + 提示词宏展开
+// ---------------------------------------------------------------------------
+
+/// lore 条目名兜底键序：title → name → comment（quill pack.lore_entries 用 title，
+/// ST character_book 条目多用 name/comment）。
+fn lore_entry_name(e: &Value) -> &str {
+    e.get("title")
+        .or_else(|| e.get("name"))
+        .or_else(|| e.get("comment"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+}
+
+fn lore_entry_content(e: &Value) -> &str {
+    e.get("content").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+/// 从 pack.lore_entries 收集 `[InitVar]` 源（含已禁用条目，对齐 AIcove）。
+pub fn init_sources_from_lore_entries(entries: &[Value]) -> Vec<MvuInitSource> {
+    entries
+        .iter()
+        .filter(|e| is_initvar_entry(lore_entry_name(e)))
+        .map(|e| MvuInitSource {
+            name: lore_entry_name(e).to_string(),
+            content: lore_entry_content(e).to_string(),
+        })
+        .collect()
+}
+
+/// 会话是否"MVU 活跃"：任一消息带更新块，或存在非空 `[InitVar]` 条目。
+/// 非活跃会话走宏展开直通路径（零拷贝、零解析），保住提示词装配热路径。
+pub fn is_mvu_active(lore_entries: &[Value], message_blocks: &[String]) -> bool {
+    if message_blocks.iter().any(|b| !b.trim().is_empty()) {
+        return true;
+    }
+    init_sources_from_lore_entries(lore_entries)
+        .iter()
+        .any(|s| !s.content.trim().is_empty())
+}
+
+/// 基线（`[InitVar]` 条目）+ 沿落盘消息链顺序重放更新块 → 当前 stat_data。
+/// 每轮请求构建一次、请求内固定（对齐 AIcove"每轮一次快照"语义；ADR-0004
+/// 真相源：快照永远可由 `[InitVar]` + 落盘消息链重建）。
+/// 已知 v1 缺口：开场白 `<initvar>` 覆盖、prev_anchor/raw_hash 增量缓存未做。
+pub fn snapshot_stat_data(lore_entries: &[Value], message_blocks: &[String]) -> MvuInitResult {
+    let sources = init_sources_from_lore_entries(lore_entries);
+    let mut r = init_from_entries(&sources);
+    for b in message_blocks {
+        // 重放沿用逐条跳过+诊断语义；此处诊断不影响主链路（init_from_entries 的
+        // 诊断已含在返回值里，调用方需要时可记日志）
+        let _ = apply_update_block(&mut r.stat_data, b);
+    }
+    r
+}
+
+/// 展开 prompt 中的 `{{get_message_variable::path}}`（ASCII 大小写不敏感）。
+/// `{{format_message_variable::path}}` v1 同样输出 JSON（YAML 输出为已知缺口）。
+/// 找不到路径 → `null` 字符串；非 MVU 宏的花括号原样保留。
+pub fn expand_variable_macros(prompt: &str, stat_data: &Value) -> String {
+    let mut out = String::with_capacity(prompt.len());
+    let mut rest = prompt;
+    loop {
+        let Some(start) = rest.find("{{") else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(rel) = after.find("}}") else {
+            // 未闭合：原样保留剩余
+            out.push_str(&rest[start..]);
+            break;
+        };
+        let inner = after[..rel].trim();
+        let mut replaced = false;
+        for p in ["get_message_variable::", "format_message_variable::"] {
+            if inner.len() > p.len() && inner[..p.len()].eq_ignore_ascii_case(p) {
+                out.push_str(&format_variable_json(stat_data, &inner[p.len()..]));
+                replaced = true;
+                break;
+            }
+        }
+        if replaced {
+            rest = &after[rel + 2..];
+        } else {
+            // 非 MVU 宏：原样吐回 "{{"，从 "}}" 之外继续扫描（防吞嵌套）
+            out.push_str("{{");
+            rest = after;
+        }
+    }
+    out
+}
+
+/// P3 一步入口：活性检测 → 基线+重放 → 宏展开。
+/// 非 MVU 会话原样返回调用方字符串（零解析、零额外分配）。
+pub fn expand_mvu_macros(prompt: &str, message_blocks: &[String], lore_entries: &[Value]) -> String {
+    if !is_mvu_active(lore_entries, message_blocks) {
+        return prompt.to_string();
+    }
+    let snap = snapshot_stat_data(lore_entries, message_blocks);
+    expand_variable_macros(prompt, &snap.stat_data)
 }
 
 // ---------------------------------------------------------------------------
@@ -1481,6 +1586,55 @@ mod tests {
         assert!(shown.contains("她推开门"));
         assert!(shown.contains("【完】"));
         assert!(!shown.contains("UpdateVariable"));
+    }
+
+    // ── P3: 快照重放 + 宏展开 ──
+
+    #[test]
+    fn p3_snapshot_replays_blocks_in_message_order() {
+        let lore = vec![
+            json!({"title": "[InitVar]状态", "content": r#"{"好感度": 10, "地点": "教室"}"#}),
+            json!({"title": "普通条目", "content": "无关内容"}),
+        ];
+        let b1 = "<UpdateVariable>_.set('好感度', 20)</UpdateVariable>".to_string();
+        let b2 = "<UpdateVariable>_.add('好感度', -5)</UpdateVariable>".to_string();
+        let snap = snapshot_stat_data(&lore, &[b1, b2]);
+        assert_eq!(snap.stat_data["好感度"], json!(15));
+        assert_eq!(snap.stat_data["地点"], json!("教室"));
+    }
+
+    #[test]
+    fn p3_expand_macros_case_insensitive_and_passthrough() {
+        let stat = json!({"角色": {"好感度": 42}});
+        let p = "前文 {{get_message_variable::角色.好感度}} 中 {{GET_MESSAGE_VARIABLE::角色}} 尾";
+        let out = expand_variable_macros(p, &stat);
+        assert_eq!(out, "前文 42 中 {\"角色\":{\"好感度\":42}} 尾");
+
+        // 非 MVU 宏原样保留
+        let p2 = "{{char}} 与 {{get_message_variable::不存在}}";
+        assert_eq!(expand_variable_macros(p2, &stat), "{{char}} 与 null");
+
+        // 未闭合花括号原样保留
+        let p3 = "abc {{ get_message_variable::x";
+        assert_eq!(expand_variable_macros(p3, &stat), p3);
+    }
+
+    #[test]
+    fn p3_expand_mvu_macros_gates_on_activity() {
+        let lore = vec![json!({"title": "[InitVar]状态", "content": r#"{"hp": 5}"#})];
+        let p = "{{get_message_variable::hp}}";
+        // 有 InitVar → 展开
+        assert_eq!(expand_mvu_macros(p, &[], &lore), "5");
+        // 块重放覆盖 InitVar 基线
+        let blocks = vec!["<UpdateVariable>_.set('hp', 99)</UpdateVariable>".to_string()];
+        assert_eq!(expand_mvu_macros(p, &blocks, &lore), "99");
+
+        // 无 InitVar 无块 → 原样返回（热路径直通）
+        let empty_lore: Vec<Value> = vec![];
+        assert_eq!(expand_mvu_macros(p, &[], &empty_lore), p);
+        // 有块无 InitVar → 以空基线重放,命令自建路径
+        let gold_blocks = vec!["<UpdateVariable>_.set('gold', 7)</UpdateVariable>".to_string()];
+        assert_eq!(expand_mvu_macros("{{get_message_variable::gold}}", &gold_blocks, &empty_lore), "7");
     }
 
     #[test]

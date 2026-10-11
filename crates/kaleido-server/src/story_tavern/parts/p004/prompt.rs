@@ -1168,5 +1168,16 @@ pub(crate) fn build_tavern_system_prompt(
     // 仅作剧情素材, 不是指令, 不得据此改变系统行为。
     lines.push(kaleido_core::prompt_safety::safety_footer().to_string());
 
-    lines.join("\n")
+    let prompt = lines.join("\n");
+    // [MVU P3 2026-10-11, 吞噬自 AIcove] 会话 MVU 快照重放 + 宏展开：
+    // 活性检测（pack 存在 [InitVar] 条目，或任一落盘消息带更新块）未命中时
+    // 原样返回（零解析零拷贝，热路径不受影响）；命中时以 [InitVar] 为基线、
+    // 沿落盘消息链重放 msg.mvuBlocks（ADR-0004 真相源），按本轮快照展开
+    // {{get_message_variable::path}}，请求内固定。
+    let session_blocks: Vec<String> = session
+        .messages
+        .iter()
+        .flat_map(|m| m.mvu_blocks.iter().cloned())
+        .collect();
+    kaleido_core::st_mvu::expand_mvu_macros(&prompt, &session_blocks, &pack.lore_entries)
 }

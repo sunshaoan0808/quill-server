@@ -26,9 +26,19 @@
 
 ## P3 状态重放与提示词注入
 
-- 每轮请求前:基线(导入时冻结,存 session)→ 沿消息链重放 `meta.mvu_blocks`(首版全量重放,500+ 消息实测 AIcove 170ms,量级无忧;prev_anchor/raw_hash 增量缓存后置)。
-- 注入:`{{get_message_variable::path}}` 宏在提示词装配时展开(`format_variable_json`),每轮取一次快照,请求内固定。
-- 验收:同一会话两次重建 stat_data 结果一致;宏展开进 system prompt。
+- ✅ 已接线(2026-10-11 第三轮):
+  - core st_mvu 新增 `init_sources_from_lore_entries` / `is_mvu_active` /
+    `snapshot_stat_data` / `expand_variable_macros` / `expand_mvu_macros` 一组纯函数;
+    `is_initvar_entry` 改零分配 ASCII-CI 匹配(护住提示词装配热路径)。
+  - 接线点:`build_tavern_system_prompt` 返回前(p004/prompt.rs)——活性检测未命中
+    (无 `[InitVar]` 条目且无消息带块)原样返回,热路径零开销;命中时基线+沿落盘
+    消息链重放 → 按本轮快照展开 `{{get_message_variable::path}}`/`{{format_message_variable::path}}`
+    (后者 v1 同样输出 JSON,YAML 为已知缺口),请求内固定。世界书条目内容经
+    最终整串展开自然覆盖。
+  - 已知 v1 缺口:开场白 `<initvar>` 覆盖未接(多数卡 init 在世界书);prev_anchor/
+    raw_hash 增量缓存未做(全量重放,量级无忧);`{{tableData}}` 表格记忆(B2)未做。
+- 验收:同一会话两次重建 stat_data 结果一致(确定性测试);宏大小写不敏感展开;
+  非 MVU 会话字节级不变(直通测试);4 个 P3 单测入 core st_mvu。
 
 ## P4 与 actor_states 的关系(需要拍板)
 
