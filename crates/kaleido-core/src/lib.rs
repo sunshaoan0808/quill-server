@@ -101,6 +101,8 @@ pub mod moa_comparison;
 pub mod import_security;
 pub mod text_chunker;
 pub mod progressive_compress;
+pub mod st_mvu; // [MVU 2026-10-11, 吞噬自 AIcove] 酒馆 MVU 变量"只解析不执行"兼容层（纯函数，零新依赖）
+pub mod proactive_trigger; // [主动关怀 P1 2026-10-11, 吞噬自 AIcove] 触发器模型+判定+JSON store（P2 调度器在 server）
 pub use import_security::{
     decode_utf8_imported_text, inspect_imported_plain_text, ImportThreat,
     MAX_IMPORT_TEXT_BYTES,
