@@ -16,7 +16,7 @@
 use axum::{
     extract::{Path, State},
     http::HeaderMap,
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
