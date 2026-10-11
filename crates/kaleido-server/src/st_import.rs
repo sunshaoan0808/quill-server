@@ -223,6 +223,9 @@ pub async fn import_st(
 
     let lore_n = bundle.lore_entry_count;
     let regex_n = bundle.regex_count;
+    // [MVU P1 2026-10-11, 吞噬自 AIcove] 导入响应附 MVU 只读预检（基线可否构建、
+    // [InitVar] 条目数、诊断 top5），不改导入行为；无 MVU 的卡 hasMvu=false 零影响。
+    let mvu = kaleido_core::st_mvu::card_mvu_precheck(&bundle.card.raw_data);
     let has_book = bundle.world_book.is_some() || bundle.card.character_book.is_some();
     let external_wb = bundle.character.world_book_id.is_some();
 
@@ -247,6 +250,7 @@ pub async fn import_st(
                 "source": source,
                 "loreEntryCount": lore_n,
                 "regexScriptCount": regex_n,
+                "mvu": mvu,
                 "note": note,
             }))
             .into_response()
