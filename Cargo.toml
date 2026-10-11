@@ -41,7 +41,7 @@ regex = "1"
 # AEAD (AES-256-GCM) for encrypting provider API keys at rest. Already resolved
 # via rustls, so this adds no new crates to the lock.
 ring = "0.17"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 
 # Faster CI builds on self-hosted runner (4-core). LTO off + more codegen units.
