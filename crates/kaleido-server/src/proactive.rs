@@ -175,10 +175,11 @@ async fn cancel_trigger(
         Ok(l) => l,
         Err(e) => return map_core_err(e),
     };
-    let Some(t) = list.iter_mut().find(|t| t.id == trigger_id) else {
+    // 索引定位而非 iter_mut 句柄：避免可变借用横跨 save_for_session 的不可变借用(E0502)
+    let Some(pos) = list.iter().position(|t| t.id == trigger_id) else {
         return not_found("PROACTIVE_TRIGGER_NOT_FOUND", &trigger_id);
     };
-    if !t.mark_cancelled() {
+    if !list[pos].mark_cancelled() {
         return bad_request(
             "PROACTIVE_NOT_PENDING",
             "trigger is not pending (already fired/expired/cancelled)",
@@ -191,7 +192,7 @@ async fn cancel_trigger(
         "proactive.log",
         &format!("{} cancel tid={} sid={}", Utc::now().to_rfc3339(), trigger_id, session_id),
     );
-    Json(json!({ "ok": true, "trigger": t })).into_response()
+    Json(json!({ "ok": true, "trigger": &list[pos] })).into_response()
 }
 
 // ---------------------------------------------------------------------------
