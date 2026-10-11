@@ -88,6 +88,15 @@ pub(crate) async fn assemble_and_persist_turn(
                 if !stripped.is_empty() {
                     append_thinking(&mut reasoning_merged, &stripped);
                 }
+                // [MVU P2 2026-10-11, 吞噬自 AIcove] 定稿正文提取 <UpdateVariable>/<JSONPatch>
+                // 块并从正文剥离——展示与后续喂模型的正文不含更新协议块；块原文按消息
+                // 落盘（msg.mvuBlocks），P3 沿落盘消息链重放得 stat_data（ADR-0004 真相源：
+                // 状态永远可从持久化消息重建）。<think> 内块天然被跳过；无块时零开销。
+                let mvu_blocks = kaleido_core::st_mvu::extract_update_blocks(&story_body);
+                let story_body = kaleido_core::st_mvu::strip_update_blocks(&story_body);
+                if !mvu_blocks.is_empty() {
+                    tracing::info!(n = mvu_blocks.len(), %session_id_bg, "st mvu: update blocks captured from final body");
+                }
                 let reasoning_final = if reasoning_merged.is_empty() {
                     None
                 } else {
@@ -110,6 +119,8 @@ pub(crate) async fn assemble_and_persist_turn(
                     swipes: inherited_swipes,
                     swipe_index: 0,
                     tokens: usage_tokens,
+                    // [MVU P2] 更新协议块原文（已从 content 剥离）；空 = 本回合无 MVU 输出
+                    mvu_blocks,
                 };
                 sess.messages.push(asst_msg);
                 sess.turn += 1;

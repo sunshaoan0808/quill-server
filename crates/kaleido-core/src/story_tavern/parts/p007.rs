@@ -37,6 +37,7 @@ mod turn_submit_guard_tests {
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         }
     }
 

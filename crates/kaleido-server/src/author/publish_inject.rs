@@ -563,6 +563,7 @@ pub(crate) async fn inject_to_session(
         swipes: vec![],
         swipe_index: 0,
         tokens: 0,
+        mvu_blocks: Vec::new(),
     };
     // Check TavernMessage fields - may differ
     // We'll fix compile if struct differs

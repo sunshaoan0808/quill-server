@@ -540,6 +540,7 @@ mod tests {
             program: None,
             reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         }
     }
 

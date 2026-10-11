@@ -38,6 +38,7 @@ pub(crate) mod perf_baseline {
                     swipes: vec![],
                     swipe_index: 0,
                     tokens: 0,
+                    mvu_blocks: Vec::new(),
                 });
             }
         }

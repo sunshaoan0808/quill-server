@@ -138,6 +138,7 @@ pub(crate) async fn start_turn(
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         };
         tavern.messages.push(user_msg);
     }

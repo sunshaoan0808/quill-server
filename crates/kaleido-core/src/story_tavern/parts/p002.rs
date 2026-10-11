@@ -361,6 +361,26 @@ mod l2_event_tests {
         }
     }
 
+    /// [MVU P2 2026-10-11] 旧会话 JSON（无 mvuBlocks 字段）必须零影响加载；
+    /// 新字段仅在非空时序列化（前端/磁盘不膨胀）。
+    #[test]
+    fn tavern_message_mvu_blocks_default_and_roundtrip() {
+        let old = r#"{"id":"m1","role":"assistant","content":"x"}"#;
+        let m: TavernMessage = serde_json::from_str(old).unwrap();
+        assert!(m.mvu_blocks.is_empty());
+        // 空 mvu_blocks 不序列化（skip_serializing_if = Vec::is_empty）
+        let s_empty = serde_json::to_string(&m).unwrap();
+        assert!(!s_empty.contains("mvuBlocks"), "空 mvu_blocks 应省略: {s_empty}");
+
+        let mut m2 = m.clone();
+        m2.mvu_blocks.push("<UpdateVariable>_.set('a', 1)</UpdateVariable>".into());
+        let s = serde_json::to_string(&m2).unwrap();
+        assert!(s.contains("\"mvuBlocks\""), "非空时必须序列化: {s}");
+        let back: TavernMessage = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.mvu_blocks.len(), 1);
+        assert_eq!(back.mvu_blocks[0], "<UpdateVariable>_.set('a', 1)</UpdateVariable>");
+    }
+
     #[test]
     fn l2_keeps_within_limit() {
         let evs: Vec<MemoryL2Event> = (0..5).map(|i| ev(&format!("e{i}"), "other", "x")).collect();
@@ -412,6 +432,11 @@ pub struct TavernMessage {
     /// 默认 0 = 旧数据/未捕获；前端 stMsgMeta 开关显示「HH:MM · N tok」。
     #[serde(default, skip_serializing_if = "is_zero")]
     pub tokens: u32,
+    /// [MVU P2 2026-10-11, 吞噬自 AIcove] 回复尾部的 `<UpdateVariable>`/`<JSONPatch>`
+    /// 块原文（已从正文剥离，按消息落盘）。P3 沿落盘消息链重放得 stat_data
+    /// （ADR-0004 真相源：展示/喂模型的正文不含更新块，状态可由消息链重建）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mvu_blocks: Vec<String>,
 }
 
 pub(crate) fn is_zero(v: &u32) -> bool {

@@ -289,6 +289,7 @@ pub fn seed_opening_if_needed(session: &mut TavernSession, pack: &StoryPack) -> 
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+        mvu_blocks: Vec::new(),
     });
     session.opening_seeded = true;
     // Opening is not a player turn; keep turn at 0.
@@ -335,6 +336,7 @@ pub fn enter_side_branch(
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+        mvu_blocks: Vec::new(),
     });
     session.opening_seeded = true;
     Ok(())

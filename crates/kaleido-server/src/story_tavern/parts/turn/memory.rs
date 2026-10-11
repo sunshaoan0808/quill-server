@@ -637,6 +637,7 @@ pub(crate) async fn post_turn_memory_phase(
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
                         };
                         sess.messages.push(canon_msg);
                     }
@@ -778,6 +779,7 @@ pub(crate) async fn post_turn_memory_phase(
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
                         });
 
                         // Non-blocking LLM summarization

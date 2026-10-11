@@ -319,6 +319,7 @@ pub(crate) fn sweep_orphan_runs(state: &AppState) {
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         if let Err(e) = state.sessions_tavern.save(sess.clone()) {
             tracing::warn!(%prev, error=%e, "st sweep_orphan_runs: save failed");

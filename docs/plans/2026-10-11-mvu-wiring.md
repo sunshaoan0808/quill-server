@@ -5,19 +5,24 @@
 
 ## P1 导入侧预检(只读,不改行为)
 
-- ✅ 已落地(2026-10-11 第二轮):`st_mvu::card_mvu_precheck(&Value) -> MvuPrecheckReport`
-  ——对 v1 平卡/v2/v3 信封的解析后卡片 JSON 做只读预检([InitVar] 条目数、基线空跑
-  诊断 top5、开场白含 `<initvar>`/`<UpdateVariable>` 标记,alternate_greetings 一并扫),
-  camelCase 可直接进导入报告 JSON。**有意不接 StImportBundle**(跨 crate 结构体,
-  加字段波及全部构造点);接线 = 导入 handler 一行 `let mvu = st_mvu::card_mvu_precheck(&card_json);`,
-  作为独立小 patch。
-- 验收:带 MVU 的测试卡导入出报告;无 MVU 卡零影响。(单测已覆盖三种卡形态)
+- ✅ 已接线(2026-10-11 第三轮):`POST /api/v1/partner/st-import` 响应新增
+  `"mvu": MvuPrecheckReport`(camelCase:hasMvu/initvarEntryCount/initFailed/strictSet/
+  diagnosticCount/diagnostics)。取自 `bundle.card.raw_data`(v1 平卡为整卡、v2/v3 为
+  data 对象,`card_mvu_precheck` 两者兼容),在 `persist_bundle` 消费 bundle 前计算。
+  无 MVU 卡 `hasMvu=false` 零影响;单测覆盖三种卡形态。
 
 ## P2 回合输出侧落块
 
-- server 回合循环:模型回复落库前,`extract_update_blocks` 提取更新块 → 存入消息 meta(如 `message.meta.mvu_blocks`);`strip_update_blocks` 后的文本进展示/历史。
-- `<think>` 内块天然被 extract 跳过。
-- 验收:带更新块的回复,历史里正文干净、块在 meta 可查;turn 回放不丢。
+- ✅ 已接线(2026-10-11 第三轮):
+  - `TavernMessage` 新增 `mvu_blocks: Vec<String>`(`#[serde(default,
+    skip_serializing_if = "Vec::is_empty")]`,旧会话 JSON 零影响加载,空时不序列化;
+    全部 21 处构造点已补 `Vec::new()`,serde 兼容回归测试在 core story_tavern p002)。
+  - `turn/persist.rs::assemble_and_persist_turn`:全部剥离链(思维/自白/导演前缀)之后、
+    消息组装之前,`extract_update_blocks` 提取 + `strip_update_blocks` 剥离——展示与
+    后续喂模型的正文不含协议块,块原文落 `msg.mvuBlocks`;有块时 tracing::info 记数。
+  - 已知 v1 缺口:swipes(重掷备选正文)不经此路径,不带块;event_extract 后台任务读
+    `full_text` 原文仍会看到更新块(启发式提取噪音,低风险,后续统一)。
+- 验收:带更新块的回复,历史正文干净、块落 `mvuBlocks`;旧会话加载零影响(回归测试)。
 
 ## P3 状态重放与提示词注入
 

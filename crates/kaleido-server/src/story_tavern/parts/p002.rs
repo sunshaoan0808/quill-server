@@ -317,6 +317,7 @@ pub(crate) async fn set_play_mode(
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+        mvu_blocks: Vec::new(),
     });
     match state.sessions_tavern.save_with_revision(sess, &base_revision) {
         Ok(s) => Json(s).into_response(),
@@ -803,6 +804,7 @@ pub(crate) async fn rebind_vessel(
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+        mvu_blocks: Vec::new(),
     });
 
     match state.sessions_tavern.save_with_revision(sess, &base_revision) {

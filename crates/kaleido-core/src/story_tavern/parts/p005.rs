@@ -497,6 +497,7 @@ impl TavernSessionStore {
             program: None,
             reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         let _ = safe_id(&new_id)?;
         fs::create_dir_all(self.dir())?;
@@ -560,6 +561,7 @@ impl TavernSessionStore {
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         // inline save under same lock
         if snap.session_id.trim().is_empty() {
@@ -776,6 +778,7 @@ pub(super) mod tests {
             program: None,
             reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         sess.opening_seeded = true;
         sessions.save(sess.clone()).unwrap();
@@ -798,6 +801,7 @@ pub(super) mod tests {
             program: None,
             reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         sess.active_run_id = Some(run_id.to_string());
         let base_rev = sess.updated_at.clone();
@@ -819,6 +823,7 @@ pub(super) mod tests {
             program: None,
             reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         disk.turn += 1;
         disk.active_run_id = None;
@@ -1215,6 +1220,7 @@ pub(super) mod tests {
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
             }
         }
 

@@ -24,6 +24,7 @@ use crate::story_tavern::parts::*;
                 program: None,
                 reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
             },
         ];
         let ctx = estimate_turn_ctx_chars(&sess, "sys", "u", "d");
@@ -49,6 +50,7 @@ use crate::story_tavern::parts::*;
             swipes: vec![],
             swipe_index: 0,
             tokens: 0,
+            mvu_blocks: Vec::new(),
             });
         }
         assert!(
@@ -138,6 +140,7 @@ use crate::story_tavern::parts::*;
             program: None,
             reasoning: None,
             tokens: 0,
+            mvu_blocks: Vec::new(),
         });
         // 调低字符阈值为 5 → 触发；调高消息阈值为 999 → 仅字符侧触发
         assert!(should_epoch_compress_with(&sess, 10, 5, 999));
