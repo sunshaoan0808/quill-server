@@ -82,6 +82,8 @@ window.stDeleteMessage = stDeleteMessage;
 // ---- WIRE:_tavern-send.js ----
 window.stPartialEdit = stPartialEdit;
 // ---- WIRE:_tavern-send.js ----
+window.stForkAtMessage = stForkAtMessage;
+// ---- WIRE:_tavern-send.js ----
 window.stToggleBookmark = stToggleBookmark;
 // ---- WIRE:_tavern-send.js ----
 window.stRenderBookmarks = stRenderBookmarks;

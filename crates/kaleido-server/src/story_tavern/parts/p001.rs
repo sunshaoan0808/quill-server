@@ -880,6 +880,10 @@ pub fn router() -> Router<AppState> {
             post(fork_save),
         )
         .route(
+            "/api/v1/story-tavern/sessions/{id}/fork-at",
+            post(fork_at_message),
+        )
+        .route(
             "/api/v1/story-tavern/sessions/{id}/stop",
             post(stop_turn),
         )
