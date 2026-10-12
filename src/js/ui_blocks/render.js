@@ -12,6 +12,8 @@
 
 import { mountChart } from './chart.js';
 import { buildGantt } from './gantt.js';
+import { buildCalculator } from './calculator.js';
+import { buildFunctionPlot } from './function-plot.js';
 
 const registry = new Map();
 
@@ -291,6 +293,12 @@ reg('chart', (props) => {
 /* ---------- gantt ---------- */
 
 reg('gantt', (props) => buildGantt(props));
+
+/* ---------- calculator / function-plot (expression engine) ---------- */
+
+reg('calculator', (props) => buildCalculator(props));
+
+reg('function-plot', (props) => buildFunctionPlot(props));
 
 /* ---------- error card (bad JSON / unknown component) ---------- */
 

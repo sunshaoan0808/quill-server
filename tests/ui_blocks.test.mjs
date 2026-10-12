@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, it as test, expect } from 'vitest';
 import {
   extractUIBlocks,
   stripUIBlockFences,
@@ -119,15 +119,17 @@ describe('parseUiBlockSpec — 载荷校验', () => {
 });
 
 describe('registry — PR2 静态组件注册', () => {
-  it('注册了 8 个渲染器（6 静态 + chart/gantt）', () => {
+  it('注册了 10 个渲染器（6 静态 + chart/gantt/calculator/function-plot）', () => {
     expect(rendererNames().sort()).toEqual(
-      ['card-grid', 'chart', 'data-table', 'decision-tree', 'diff', 'gantt', 'quiz', 'stat-grid'].sort(),
+      ['card-grid', 'chart', 'data-table', 'decision-tree', 'diff', 'gantt', 'quiz', 'stat-grid',
+        'calculator', 'function-plot'].sort(),
     );
   });
 
   it('hasRenderer 识别已知/未知', () => {
-    expect(hasRenderer('calculator')).toBe(false); // 表达式引擎批次
-    expect(hasRenderer('chart')).toBe(true);
+    expect(hasRenderer('calculator')).toBe(true);
+    expect(hasRenderer('function-plot')).toBe(true);
+    expect(hasRenderer('nope')).toBe(false);
     expect(hasRenderer('card-grid')).toBe(true);
   });
 });
@@ -281,5 +283,85 @@ describe('parseGantt — 任务解析', () => {
     const { parseGantt } = await import('../src/js/ui_blocks/gantt.js');
     expect(parseGantt({}).tasks).toHaveLength(0);
     expect(parseGantt({ tasks: [] }).spanEnd).toBe(1);
+  });
+});
+
+/* ---------- expression engine ---------- */
+
+import {
+  compileExpression,
+  ExpressionError,
+} from '../src/js/ui_blocks/expression.js';
+import { parseCurve } from '../src/js/ui_blocks/function-plot.js';
+
+describe('expression engine', () => {
+  test('arithmetic precedence and unary minus binds tighter than power', () => {
+    expect(compileExpression('2 + 3 * 4').evaluate({})).toBe(14);
+    expect(compileExpression('-2^2').evaluate({})).toBe(-4);
+    expect(compileExpression('2 ^ 3 ^ 2').evaluate({})).toBe(512);
+    expect(compileExpression('(2 + 3) * 4').evaluate({})).toBe(20);
+  });
+
+  test('variables, ternary and boolean operators', () => {
+    expect(compileExpression('price * qty').evaluate({ price: 12.5, qty: 3 })).toBe(37.5);
+    expect(compileExpression('price > 10 ? 0.9 : 1').evaluate({ price: 12 })).toBe(0.9);
+    expect(compileExpression('x % 2').evaluate({ x: 7 })).toBe(1);
+    expect(compileExpression('2 ** 10').evaluate({})).toBe(1024);
+  });
+
+  test('function library', () => {
+    expect(compileExpression('round(3.14159, 2)').evaluate({})).toBe(3.14);
+    expect(compileExpression('clamp(x, 0, 100)').evaluate({ x: 150 })).toBe(100);
+    expect(compileExpression('sum(list)').evaluate({ list: [1, 2, 3, 4] })).toBe(10);
+    expect(compileExpression('avg(range(1, 5))').evaluate({})).toBe(3);
+    expect(compileExpression('contains(list, "b")').evaluate({ list: ['a', 'b'] })).toBe(true);
+    expect(compileExpression('max(3, 9, 4)').evaluate({})).toBe(9);
+    expect(compileExpression('sqrt(144)').evaluate({})).toBe(12);
+    expect(compileExpression('min(range(1, 5))').evaluate({})).toBe(1);
+  });
+
+  test('numeric floor so integer divisions stay numbers', () => {
+    const v = compileExpression('1 / 4').evaluate({});
+    expect(typeof v).toBe('number');
+    expect(v).toBe(0.25);
+  });
+
+  test('string concat + and string comparisons', () => {
+    expect(compileExpression('"a" + "b"').evaluate({})).toBe('ab');
+    expect(compileExpression('name == "x" ? 1 : 0').evaluate({ name: 'x' })).toBe(1);
+  });
+
+  test('unknown variable / function are ExpressionError', () => {
+    expect(() => compileExpression('nope + 1').evaluate({})).toThrow(ExpressionError);
+    expect(() => compileExpression('nope(1)').evaluate({})).toThrow(ExpressionError);
+  });
+
+  test('forbidden members are rejected', () => {
+    expect(() => compileExpression('a.__proto__').evaluate({ a: {} })).toThrow(ExpressionError);
+    expect(() => compileExpression('a["constructor"]').evaluate({ a: {} })).toThrow(ExpressionError);
+  });
+
+  test('budget caps runaway formulas', () => {
+    const many = new Array(500).fill(1).join(' + ');
+    expect(() => compileExpression(many)).toThrow(ExpressionError);
+  });
+
+  test('top-level concat is allowed; broken syntax rejected', () => {
+    expect(compileExpression('"total: " + total').evaluate({ total: 5 })).toBe('total: 5');
+    expect(() => compileExpression('(1 + 2')).toThrow(ExpressionError);
+  });
+
+  test('values equal compares records deeply for lists', () => {
+    expect(compileExpression('list == other ? 1 : 0').evaluate({
+      list: [1, [2, 3]], other: [1, [2, 3]],
+    })).toBe(1);
+  });
+});
+
+describe('parseCurve', () => {
+  test('implicit row', () => {
+    expect(() => parseCurve('x^2 + y^2 = 25')).not.toThrow();
+    expect(() => parseCurve('y = sin(x)')).not.toThrow();
+    expect(() => parseCurve('y > 3')).toThrow();
   });
 });
