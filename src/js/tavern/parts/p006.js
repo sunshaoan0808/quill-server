@@ -613,6 +613,7 @@ async function stLoadSaves() {
     console.warn(e);
   }
   await stLoadWorldline();
+  await stLoadShare();
 }
 
 async function stCreateSave() {
@@ -628,6 +629,63 @@ async function stCreateSave() {
     await stLoadSaves();
     showToast('已存档', 'success');
   } catch (e) { showToast('存档失败：' + e.message, 'error'); }
+}
+
+// ─── 会话分享链接（吸收 DEEIX share：快照式公开只读） ───────────────────────
+function stShareUrl(shareId) {
+  return location.origin + '/api/v1/story-tavern/share/' + shareId;
+}
+
+function stRenderShareState(d) {
+  const active = !!(d && d.status === 'active');
+  document.querySelectorAll('#st-share-revoke, #st-drawer-share-revoke').forEach((b) => {
+    b.classList.toggle('hidden', !active);
+  });
+  const text = active
+    ? ('已分享 · ' + (d.messageCount || 0) + ' 条消息 · ' + stShareUrl(d.shareId))
+    : '未分享';
+  document.querySelectorAll('#st-share-status, #st-drawer-share-status').forEach((h) => {
+    h.textContent = text;
+  });
+}
+
+async function stLoadShare() {
+  const hosts = document.querySelectorAll('#st-share-status, #st-drawer-share-status');
+  if (!hosts.length) return;
+  for (const h of hosts) h.textContent = tavernSession ? '加载中…' : '未分享（先打开会话）';
+  if (!tavernSession) return;
+  try {
+    const d = await stApi('/sessions/' + encodeURIComponent(tavernSession.sessionId) + '/share');
+    stRenderShareState(d);
+  } catch (e) {
+    for (const h of hosts) h.textContent = '分享状态加载失败';
+    console.warn(e);
+  }
+}
+
+async function stCreateShare() {
+  if (!tavernSession) { showToast('先打开会话再分享', 'warning'); return; }
+  try {
+    const d = await stApi('/sessions/' + encodeURIComponent(tavernSession.sessionId) + '/share', { method: 'POST', body: '{}' });
+    stRenderShareState(d);
+    const url = stShareUrl(d.shareId);
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast('分享链接已生成并复制到剪贴板', 'success');
+    } catch (_) {
+      showToast('分享链接已生成：' + url, 'success');
+    }
+  } catch (e) { showToast('生成分享链接失败：' + e.message, 'error'); }
+}
+
+async function stRevokeShare() {
+  if (!tavernSession) return;
+  if (!await showConfirm('撤销后旧分享链接立即失效，确认？')) return;
+  try {
+    await stApi('/sessions/' + encodeURIComponent(tavernSession.sessionId) + '/share', { method: 'DELETE' });
+    stRenderShareState({ status: 'none' });
+    showToast('分享已撤销', 'success');
+  } catch (e) { showToast('撤销失败：' + e.message, 'error'); }
 }
 
 async function stRestoreSave(saveId) {
