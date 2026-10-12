@@ -452,13 +452,10 @@ mod tests {
 
     #[test]
     fn panel_capability_supersedes_calculator() {
-        let mut comps = builtin_components();
+        // 内置能力行默认启用（全吞形态 = panel+widget 全开）
+        let comps = builtin_components();
         let (p, w) = capabilities(&comps);
-        assert!(!p && !w);
-        // 勾上 panel
-        comps.iter_mut().find(|c| c.name == CAPABILITY_PANEL).unwrap().enabled = true;
-        let (p, w) = capabilities(&comps);
-        assert!(p && !w);
+        assert!(p && w);
         let out = catalog_prompt(&comps, BLOCK_FORMAT_LIVE);
         // calculator 被 panel 取代，不出现在目录
         assert!(!out.contains("<component name=\"calculator\""));
@@ -482,7 +479,9 @@ mod tests {
 
     #[test]
     fn widget_capability_adds_widget_section() {
+        // 只开 widget：panel 关掉才能断言无 <live> 节
         let mut comps = builtin_components();
+        comps.iter_mut().find(|c| c.name == CAPABILITY_PANEL).unwrap().enabled = false;
         comps.iter_mut().find(|c| c.name == CAPABILITY_WIDGET).unwrap().enabled = true;
         let out = catalog_prompt(&comps, BLOCK_FORMAT_LIVE);
         assert!(out.contains("<widget>"));
