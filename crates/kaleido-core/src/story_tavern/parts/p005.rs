@@ -520,6 +520,106 @@ impl TavernSessionStore {
         Ok(snap)
     }
 
+    /// [吸收 DEEIX conversation/service_fork.go] 从任意消息 index 分叉：
+    /// 深拷贝源会话 → 恢复「状态不超前于截断点」的最近 TurnCheckpoint → 截断消息
+    /// 到 index → 清运行态/新建世界线 → 推〔分叉〕标记。源会话不受影响。
+    ///
+    /// 状态语义与 restore_checkpoint 同源（一套字段、一条规则）：checkpoint 未覆盖的
+    /// 深层聚合（memory_l3/l4、player/world/game_clock 等）按官方 rewind 同款行为继承，
+    /// 不自造回退规则；mcp_tool_results/skill_load 是一次性注入缓存，截断后必然属于
+    /// 「未来」回合，分叉时清掉防止泄漏截断点之后的上下文。
+    pub fn fork_at_message(
+        &self,
+        session_id: &str,
+        message_index: usize,
+        label: Option<String>,
+    ) -> CoreResult<TavernSession> {
+        let _g = self.lock.lock();
+        let path = self.path_for(session_id)?;
+        if !path.exists() {
+            return Err(CoreError::NotFound(format!("session not found: {session_id}")));
+        }
+        let mut snap: TavernSession = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        if snap.active_run_id.is_some() {
+            return Err(CoreError::BadRequest(
+                "turn in progress; stop or wait before fork".into(),
+            ));
+        }
+        if message_index >= snap.messages.len() {
+            return Err(CoreError::BadRequest(format!(
+                "message index {message_index} out of range (len {})",
+                snap.messages.len()
+            )));
+        }
+        let target_len = message_index + 1;
+        if let Some(idx) = snap
+            .checkpoints
+            .iter()
+            .rposition(|c| c.messages_len <= target_len)
+        {
+            // 截断点所在/之后回合的 checkpoint 全部作废；取 ≤ target_len 的最近快照恢复
+            let cp = snap.checkpoints[idx].clone();
+            snap.turn = cp.turn;
+            snap.node_id = cp.node_id;
+            snap.chapter_cursor = cp.chapter_cursor;
+            snap.memory_l1 = cp.memory_l1;
+            snap.memory_l2 = cp.memory_l2;
+            snap.present_character_ids = cp.present_character_ids;
+            snap.focus_character_id = cp.focus_character_id;
+            snap.director_plan = cp.director_plan;
+            snap.last_event = cp.last_event;
+            snap.panels = cp.panels;
+            snap.checkpoints.truncate(idx + 1);
+        } else {
+            // 分叉点在首个回合之前（开场段）：没有可依的快照，turn 回 0、检查点全作废；
+            // node/memories 等开场态本就是初始值，保留（node 可能是选中的开场节点）。
+            snap.turn = 0;
+            snap.checkpoints.clear();
+        }
+        snap.messages.truncate(target_len);
+        // 一次性注入缓存属于截断点之后的回合，清掉（见 doc comment）
+        snap.mcp_tool_results.clear();
+        snap.skill_load = None;
+        // 运行态清理（照 fork_save_to_session）：新会话身份 + 新世界线
+        snap.session_id = format!("tavern-session-{}", Uuid::new_v4());
+        snap.active_run_id = None;
+        snap.turn_progress = None;
+        snap.last_restored_save_id = None;
+        snap.current_worldline_id = Some(format!("wl-{}", Uuid::new_v4()));
+        let now = now_rfc3339();
+        snap.created_at = now.clone();
+        snap.updated_at = now;
+        let msg_no = message_index + 1;
+        let note = match label.filter(|s| !s.trim().is_empty()) {
+            Some(l) => format!(
+                "〔分叉〕新分支「{l}」自源会话 {session_id} 第{msg_no}条消息分出，旧会话不受影响。"
+            ),
+            None => format!(
+                "〔分叉〕本会话自源会话 {session_id} 第{msg_no}条消息分出，旧会话不受影响。"
+            ),
+        };
+        snap.messages.push(TavernMessage {
+            id: format!("msg-{}", Uuid::new_v4()),
+            role: "assistant".into(),
+            content: note,
+            created_at: now_rfc3339(),
+            options: vec![],
+            swipes: vec![],
+            swipe_index: 0,
+            engine_tag: None,
+            program: None,
+            reasoning: None,
+            tokens: 0,
+            mvu_blocks: Vec::new(),
+        });
+        let new_id = snap.session_id.clone();
+        let _ = safe_id(&new_id)?;
+        fs::create_dir_all(self.dir())?;
+        let out = self.path_for(&new_id)?;
+        write_atomic(&out, &serde_json::to_string_pretty(&snap)?)?;
+        Ok(snap)
+    }
+
     pub fn restore_save(&self, session_id: &str, save_id: &str) -> CoreResult<TavernSession> {
         let _g = self.lock.lock();
         let path_save = self.save_path(session_id, save_id)?;
@@ -716,6 +816,158 @@ pub(super) mod tests {
                 let _ = fs::remove_dir_all(&self.path);
             }
         }
+    }
+
+    #[test]
+    fn fork_at_message_truncates_and_recovers_checkpoint() {
+        // [吸收 DEEIX service_fork.go] 任意消息分叉：截断到 index、恢复 ≤截断点的
+        // 最近 checkpoint（turn/node/checkpoints 截留）、新建会话身份、源会话不受影响。
+        let tmp = tempfile_shim::Tmp::new();
+        let data = DataRoot::new(tmp.path()).unwrap();
+        let packs = PackStore::new(data.clone());
+        let sessions = TavernSessionStore::new(data.clone());
+        let pack = packs.ensure_demo_pack().unwrap();
+        let mut sess = sessions
+            .create_from_pack(
+                &packs,
+                CreateSessionRequest {
+                    pack_id: pack.id.clone(),
+                    playable: Playable::P3,
+                    play_mode: PlayMode::Mainline,
+                    quality: Quality::Lite,
+                    user_tier: ContentTier::Open,
+                    global_tier: Some(ContentTier::Open),
+                    author_project_id: None,
+                    work_id: None,
+                    entry: None,
+                    player_display_name: Some("fork".into()),
+                    adult_confirmed: true,
+                    title: None,
+                    owner: None,
+                },
+            )
+            .unwrap();
+        // 5 条消息：开场(0, create_from_pack seed) + user(1) + asst(2) + user(3) + asst(4) + asst(5)
+        // 注：create_from_pack 已 seed 1 条主线开场（seed_opening_if_needed），基线不是 0
+        let base_len = sess.messages.len(); // = 1（开场）
+        for i in 0..5 {
+            sess.messages.push(TavernMessage {
+                id: format!("msg-{i}"),
+                role: (if i % 2 == 0 { "assistant" } else { "user" }).into(),
+                content: format!("m{i}"),
+                created_at: "2026-10-12T00:00:00Z".into(),
+                options: vec![],
+                swipes: vec![],
+                swipe_index: 0,
+                engine_tag: None,
+                program: None,
+                reasoning: None,
+                tokens: 0,
+                mvu_blocks: Vec::new(),
+            });
+        }
+        // 两个 checkpoint：回合 2 结束(len=3, turn=1) 与回合 4 结束(len=5, turn=2)
+        let mk_cp = |messages_len: usize, turn: u32| TurnCheckpoint {
+            messages_len,
+            turn,
+            node_id: Some("node-a".into()),
+            ..Default::default()
+        };
+        sess.checkpoints = vec![mk_cp(3, 1), mk_cp(5, 2)];
+        sess.turn = 2;
+        let src_id = sess.session_id.clone();
+        sessions.save(sess.clone()).unwrap();
+
+        // 从第 3 条消息(index=2)分叉 → 应取 len<=3 的最近 cp(turn=1, node-a)
+        let forked = sessions.fork_at_message(&src_id, 2, Some("坏结局重来".into())).unwrap();
+        assert_ne!(forked.session_id, src_id);
+        // 截断：3 条原消息 + 1 条〔分叉〕标记
+        assert_eq!(forked.messages.len(), 4);
+        assert!(forked.messages[3].content.contains("〔分叉〕"));
+        assert!(forked.messages[3].content.contains("坏结局重来"));
+        assert!(forked.messages[3].content.contains("第3条消息"));
+        // checkpoint 状态恢复（不超前于截断点的最近快照）
+        assert_eq!(forked.turn, 1);
+        assert_eq!(forked.node_id.as_deref(), Some("node-a"));
+        assert_eq!(forked.checkpoints.len(), 1);
+        assert_eq!(forked.checkpoints[0].messages_len, 3);
+        // 新身份 / 新世界线 / 运行态清空
+        assert!(forked.current_worldline_id.is_some());
+        assert!(forked.active_run_id.is_none());
+        assert!(forked.turn_progress.is_none());
+        // 源会话不受影响（基线 = 开场 + 5 条，共 6）
+        let src_after = sessions.get(&src_id).unwrap();
+        assert_eq!(src_after.messages.len(), base_len + 5);
+        assert_eq!(src_after.turn, 2);
+        assert_eq!(src_after.checkpoints.len(), 2);
+
+        // 越界拒绝
+        assert!(matches!(
+            sessions.fork_at_message(&src_id, 99, None),
+            Err(crate::CoreError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn fork_at_message_opening_segment_resets_turn() {
+        // 分叉点在首个 checkpoint 之前（开场段）：无可依快照 → turn 回 0、检查点全作废
+        let tmp = tempfile_shim::Tmp::new();
+        let data = DataRoot::new(tmp.path()).unwrap();
+        let packs = PackStore::new(data.clone());
+        let sessions = TavernSessionStore::new(data.clone());
+        let pack = packs.ensure_demo_pack().unwrap();
+        let mut sess = sessions
+            .create_from_pack(
+                &packs,
+                CreateSessionRequest {
+                    pack_id: pack.id.clone(),
+                    playable: Playable::P3,
+                    play_mode: PlayMode::Mainline,
+                    quality: Quality::Lite,
+                    user_tier: ContentTier::Open,
+                    global_tier: Some(ContentTier::Open),
+                    author_project_id: None,
+                    work_id: None,
+                    entry: None,
+                    player_display_name: Some("fork2".into()),
+                    adult_confirmed: true,
+                    title: None,
+                    owner: None,
+                },
+            )
+            .unwrap();
+        for i in 0..4 {
+            sess.messages.push(TavernMessage {
+                id: format!("msg-{i}"),
+                role: (if i % 2 == 0 { "assistant" } else { "user" }).into(),
+                content: format!("m{i}"),
+                created_at: "2026-10-12T00:00:00Z".into(),
+                options: vec![],
+                swipes: vec![],
+                swipe_index: 0,
+                engine_tag: None,
+                program: None,
+                reasoning: None,
+                tokens: 0,
+                mvu_blocks: Vec::new(),
+            });
+        }
+        // 唯一 checkpoint 在 index=3 之后（messages_len=4 > target=1），开场段分叉取不到
+        sess.checkpoints = vec![TurnCheckpoint {
+            messages_len: 4,
+            turn: 2,
+            ..Default::default()
+        }];
+        sess.turn = 2;
+        let src_id = sess.session_id.clone();
+        sessions.save(sess.clone()).unwrap();
+
+        let forked = sessions.fork_at_message(&src_id, 0, None).unwrap();
+        assert_eq!(forked.messages.len(), 2); // 开场 1 条 + 〔分叉〕标记
+        assert_eq!(forked.turn, 0);
+        assert!(forked.checkpoints.is_empty());
+        assert!(forked.mcp_tool_results.is_empty());
+        assert!(forked.skill_load.is_none());
     }
 
     #[test]

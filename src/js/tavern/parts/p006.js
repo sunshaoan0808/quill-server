@@ -720,6 +720,27 @@ async function stForkSave(saveId) {
   } catch (e) { stStatus('分叉失败：' + e.message); }
 }
 
+// [吸收 DEEIX service_fork.go] 从任意消息分叉：源会话不动，复制到新会话从该点续写
+async function stForkAtMessage(mid) {
+  if (!tavernSession || !mid) return;
+  const msgs = tavernSession.messages || [];
+  const idx = msgs.findIndex((m) => String(m.id || '') === mid);
+  if (idx < 0) { stStatus('找不到该消息位置'); return; }
+  const label = await showPrompt('新分支名称（可空）', { value: '' }) || '';
+  try {
+    const r = await stApi('/sessions/' + encodeURIComponent(tavernSession.sessionId) + '/fork-at', {
+      method: 'POST', body: JSON.stringify({ messageIndex: idx, label: label.trim() || undefined })
+    });
+    const ns = r && r.session;
+    await stLoadSessions();
+    if (ns && ns.sessionId) {
+      showToast('已从该消息分叉到新会话', 'success');
+      await stLoadSession(ns.sessionId);
+      stStatus('新分支会话 ' + ns.sessionId + ' · ' + stTurnLabel(ns.turn || 0));
+    } else showToast('已分叉', 'success');
+  } catch (e) { stStatus('分叉失败：' + e.message); }
+}
+
 async function stDeleteSave(saveId) {
   if (!tavernSession || !saveId) return;
   if (!await showConfirm('删除该存档？')) return;

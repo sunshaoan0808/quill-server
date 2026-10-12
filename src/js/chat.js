@@ -254,7 +254,14 @@ function renderMessages(opts) {
         e.stopPropagation();
         if (window.stToggleBookmark) window.stToggleBookmark(div);
       };
-      actions.appendChild(copyBtn); actions.appendChild(editBtn); actions.appendChild(bmBtn); actions.appendChild(delBtn);
+      const fkBtn = document.createElement('button');
+      fkBtn.type = 'button'; fkBtn.className = 'st-msg-act'; fkBtn.title = '从此处分叉（新会话）';
+      fkBtn.textContent = '🔩';
+      fkBtn.onclick = function (e) {
+        e.stopPropagation();
+        if (window.stForkAtMessage) window.stForkAtMessage(spec.id);
+      };
+      actions.appendChild(copyBtn); actions.appendChild(editBtn); actions.appendChild(bmBtn); actions.appendChild(delBtn); actions.appendChild(fkBtn);
       // 部分编辑按钮（RisuAI 对齐：弹层局部改写）
       if (window.stPartialEdit) {
         const peBtn = document.createElement('button');

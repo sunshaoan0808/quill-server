@@ -461,6 +461,32 @@ pub(crate) async fn fork_save(
     }
 }
 
+/// [吸收 DEEIX service_fork.go] 从任意消息分叉：POST body {messageIndex, label?}
+pub(crate) async fn fork_at_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let session = match session_from(&state, &headers) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    // ownership: source session must belong to caller
+    if let Err(e) = state.sessions_tavern.get_for_owner(&id, &session.user_id) {
+        return map_core_err(e);
+    }
+    let idx = match body.get("messageIndex").and_then(|v| v.as_u64()) {
+        Some(n) => n as usize,
+        None => return map_core_err(kaleido_core::CoreError::BadRequest("messageIndex required".into())),
+    };
+    let label = body.get("label").and_then(|v| v.as_str()).map(|s| s.to_string());
+    match state.sessions_tavern.fork_at_message(&id, idx, label) {
+        Ok(s) => Json(json!({"ok": true, "session": s})).into_response(),
+        Err(e) => map_core_err(e),
+    }
+}
+
 // ─── P0-1 story_command（/rewind N 回退、/reroll 重生成）────────────────────
 
 /// 解析 "/rewind" / "/rewind 3" / "/rewind3"；无数字或缺省 → 1。
