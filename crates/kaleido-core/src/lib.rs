@@ -61,6 +61,7 @@ pub mod dice;
 pub mod grounding;
 pub mod harness;
 pub mod context_budget;
+pub mod ui_components;
 pub mod memory_weaver;
 pub mod ledger;
 pub mod emotion_curve;
