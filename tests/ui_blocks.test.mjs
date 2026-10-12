@@ -119,14 +119,15 @@ describe('parseUiBlockSpec — 载荷校验', () => {
 });
 
 describe('registry — PR2 静态组件注册', () => {
-  it('注册了 6 个渲染器', () => {
+  it('注册了 8 个渲染器（6 静态 + chart/gantt）', () => {
     expect(rendererNames().sort()).toEqual(
-      ['card-grid', 'data-table', 'decision-tree', 'diff', 'quiz', 'stat-grid'].sort(),
+      ['card-grid', 'chart', 'data-table', 'decision-tree', 'diff', 'gantt', 'quiz', 'stat-grid'].sort(),
     );
   });
 
   it('hasRenderer 识别已知/未知', () => {
-    expect(hasRenderer('chart')).toBe(false); // 图表在 ECharts 批次
+    expect(hasRenderer('calculator')).toBe(false); // 表达式引擎批次
+    expect(hasRenderer('chart')).toBe(true);
     expect(hasRenderer('card-grid')).toBe(true);
   });
 });
@@ -136,5 +137,149 @@ describe('hashFenceBody — 稳定与区分', () => {
     expect(hashFenceBody('abc')).toBe(hashFenceBody('abc'));
     expect(hashFenceBody('abc')).not.toBe(hashFenceBody('abd'));
     expect(hashFenceBody('')).toHaveLength(8);
+  });
+});
+
+
+describe('buildChartOption — ChartProps → ECharts option', () => {
+  it('line 图：category x + 同名 series', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({
+      type: 'line',
+      x: ['一', '二', '三'],
+      series: [{ name: '销量', data: [3, 1, 4] }],
+      unit: '件',
+    });
+    expect(opt.xAxis.data).toEqual(['一', '二', '三']);
+    expect(opt.series).toHaveLength(1);
+    expect(opt.series[0].type).toBe('line');
+    expect(opt.series[0].data).toEqual([3, 1, 4]);
+    expect(opt.title).toBeUndefined();
+  });
+
+  it('bar+双轴：右侧系列 yAxisIndex=1 且有第二个 y 轴', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({
+      title: '经营', type: 'bar',
+      series: [
+        { name: '收入', data: [1, 2], type: 'bar' },
+        { name: '利润率', data: [0.1, 0.2], type: 'line', axis: 'right' },
+      ],
+    });
+    expect(opt.title.text).toBe('经营');
+    expect(Array.isArray(opt.yAxis)).toBe(true);
+    expect(opt.yAxis).toHaveLength(2);
+    expect(opt.series[1].yAxisIndex).toBe(1);
+    expect(opt.series[1].type).toBe('line');
+    expect(opt.series[0].type).toBe('bar');
+  });
+
+  it('stacked+percent：列归一到 100', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({
+      type: 'bar', stacked: true, percent: true,
+      series: [{ name: 'A', data: [1, 3] }, { name: 'B', data: [3, 1] }],
+    });
+    expect(opt.series[0].data).toEqual([25, 75]);
+    expect(opt.series[1].data).toEqual([75, 25]);
+    expect(opt.series[0].stack).toBe('t');
+  });
+
+  it('pie：单系列摊成 {name,value}', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({
+      type: 'pie',
+      x: ['甲', '乙'],
+      series: [{ name: '占比', data: [60, 40] }],
+    });
+    expect(opt.series[0].type).toBe('pie');
+    expect(opt.series[0].data).toEqual([{ name: '甲', value: 60 }, { name: '乙', value: 40 }]);
+    expect(opt.tooltip.trigger).toBe('item');
+  });
+
+  it('scatter：x 数值与 y 成对', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({
+      type: 'scatter',
+      x: [10, 20],
+      series: [{ name: '点', data: [5, 6] }],
+    });
+    expect(opt.series[0].data).toEqual([[10, 5], [20, 6]]);
+    expect(opt.xAxis.type).toBe('value');
+  });
+
+  it('radar：indicator 对齐 x', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({
+      type: 'radar',
+      x: ['攻', '防', '速'],
+      series: [{ name: '武将', data: [80, 60, 90] }],
+    });
+    expect(opt.radar.indicator.map((i) => i.name)).toEqual(['攻', '防', '速']);
+    expect(opt.series[0].type).toBe('radar');
+  });
+
+  it('null 数据点保留（断线）', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    const opt = buildChartOption({ type: 'line', series: [{ name: 's', data: [1, null, 3] }] });
+    expect(opt.series[0].data).toEqual([1, null, 3]);
+  });
+
+  it('空 series → null（渲染端出空态卡）', async () => {
+    const { buildChartOption } = await import('../src/js/ui_blocks/chart.js');
+    expect(buildChartOption({ type: 'line', series: [] })).toBeNull();
+    expect(buildChartOption({})).toBeNull();
+  });
+});
+
+describe('parseGantt — 任务解析', () => {
+  it('日期解析 + days 补 end + 分组排序', async () => {
+    const { parseGantt, parseDay } = await import('../src/js/ui_blocks/gantt.js');
+    expect(parseDay('2026-10-12')).toBe(Date.UTC(2026, 9, 12));
+    expect(parseDay('bad')).toBeNull();
+    const r = parseGantt({
+      tasks: [
+        { name: '甲组内', start: '2026-01-01', end: '2026-01-10', group: '甲' },
+        { name: '散活', start: '2026-01-03', days: 2 },
+        { name: '乙组内', start: '2026-01-05', end: '2026-01-08', group: '乙' },
+      ],
+    });
+    // 无组任务在前,然后组头+组内任务
+    expect(r.rows.map((x) => x.kind + (x.label || (x.task ? x.task.name : '')))).toEqual([
+      'task散活', 'group甲', 'task甲组内', 'group乙', 'task乙组内',
+    ]);
+    // days 补 end
+    const d = r.tasks.find((t) => t.name === '散活');
+    expect(d.end - d.start).toBe(2 * 86400000);
+    expect(r.spanStart).toBe(Date.UTC(2026, 0, 1));
+    expect(r.spanEnd).toBe(Date.UTC(2026, 0, 10));
+  });
+
+  it('坏任务丢弃 + 上限 60', async () => {
+    const { parseGantt } = await import('../src/js/ui_blocks/gantt.js');
+    const many = Array.from({ length: 65 }, (_, i) => ({ name: `t${i}`, start: '2026-01-01' }));
+    many.push({ name: '坏', start: 'n/a' });
+    const r = parseGantt({ tasks: many });
+    expect(r.tasks).toHaveLength(60);
+    expect(r.dropped).toBe(6); // 65+1 - 60(坏的在 60 外也计)
+    expect(r.tasks.some((t) => t.name === '坏')).toBe(false);
+  });
+
+  it('progress 钳制 0..100，milestone 不补 days', async () => {
+    const { parseGantt } = await import('../src/js/ui_blocks/gantt.js');
+    const r = parseGantt({
+      tasks: [
+        { name: 'p', start: '2026-01-01', end: '2026-01-02', progress: 150 },
+        { name: 'm', start: '2026-01-03', milestone: true },
+      ],
+    });
+    expect(r.tasks[0].progress).toBe(100);
+    expect(r.tasks[1].end).toBe(r.tasks[1].start);
+  });
+
+  it('空任务 → 空结构不抛', async () => {
+    const { parseGantt } = await import('../src/js/ui_blocks/gantt.js');
+    expect(parseGantt({}).tasks).toHaveLength(0);
+    expect(parseGantt({ tasks: [] }).spanEnd).toBe(1);
   });
 });
