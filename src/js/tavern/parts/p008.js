@@ -676,6 +676,10 @@ if ($('st-side-panel-close')) $('st-side-panel-close').onclick = () => stCloseSi
 if ($('st-save-create')) $('st-save-create').onclick = () => stCreateSave();
 // ---- WIRE:_tavern-side.js ----
 if ($('st-drawer-save-create')) $('st-drawer-save-create').onclick = () => stCreateSave();
+if ($('st-share-create')) $('st-share-create').onclick = () => stCreateShare();
+if ($('st-share-revoke')) $('st-share-revoke').onclick = () => stRevokeShare();
+if ($('st-drawer-share-create')) $('st-drawer-share-create').onclick = () => stCreateShare();
+if ($('st-drawer-share-revoke')) $('st-drawer-share-revoke').onclick = () => stRevokeShare();
 // ---- WIRE:_tavern-side.js ----
 if ($('st-pack-export')) $('st-pack-export').onclick = () => stExportPackZip();
 // ---- WIRE:_tavern-side.js ----
