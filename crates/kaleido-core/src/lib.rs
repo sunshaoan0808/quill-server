@@ -60,6 +60,7 @@ pub mod dice_audit;
 pub mod dice;
 pub mod grounding;
 pub mod harness;
+pub mod context_budget;
 pub mod memory_weaver;
 pub mod ledger;
 pub mod emotion_curve;

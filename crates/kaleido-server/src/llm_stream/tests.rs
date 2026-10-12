@@ -196,4 +196,113 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         assert!(!super::super::is_model_rejection(500, "model_not_found"));
         assert!(!super::super::is_model_rejection(404, "rate limited"));
     }
+
+    // -------------------------------------------------------------------
+    // Prompt cache：Anthropic system 形态 —— 大 system 挂 cache_control、
+    // 小 system 保持纯字符串（捕获请求体断言，不依赖外网）。
+    // -------------------------------------------------------------------
+
+    use std::sync::{Arc, Mutex};
+
+    /// 起一个捕获完整请求（header + Content-Length body）的假上游。
+    async fn spawn_mock_upstream_capture(
+        response: &'static [u8],
+    ) -> (u16, Arc<Mutex<Vec<u8>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let cap = captured.clone();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf: Vec<u8> = Vec::new();
+            let mut tmp = [0u8; 4096];
+            // 读到 header 结束，再按 Content-Length 收满 body
+            let mut body_len: Option<usize> = None;
+            let mut head_end: Option<usize> = None;
+            loop {
+                let n = match sock.read(&mut tmp).await {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(_) => break,
+                };
+                buf.extend_from_slice(&tmp[..n]);
+                if head_end.is_none() {
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        head_end = Some(pos);
+                        let head = String::from_utf8_lossy(&buf[..pos]);
+                        body_len = head
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                if k.eq_ignore_ascii_case("content-length") {
+                                    v.trim().parse::<usize>().ok()
+                                } else {
+                                    None
+                                }
+                            })
+                            .or(Some(0));
+                    }
+                }
+                if let (Some(pos), Some(cl)) = (head_end, body_len) {
+                    if buf.len() >= pos + 4 + cl {
+                        break;
+                    }
+                }
+            }
+            *cap.lock().unwrap() = buf;
+            let _ = sock.write_all(response).await;
+            let _ = sock.shutdown().await;
+        });
+        (port, captured)
+    }
+
+    fn anthropic_sse_resp() -> &'static [u8] {
+        b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+    }
+
+    #[tokio::test]
+    async fn turn_anthropic_large_system_gets_cache_control() {
+        let (port, captured) = spawn_mock_upstream_capture(anthropic_sse_resp()).await;
+        // 4800 字符中文 → 估算 ≈1371 token ≥ 1024
+        let system = "长系统提示。".repeat(800);
+        let out = stream_chat_turn_dispatch(
+            &format!("http://127.0.0.1:{port}"), "sk-ant", "claude-x", "anthropic",
+            &system, "usr", 0.75, 1024, 30,
+            |_| true,
+            no_stop,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "");
+        let raw = captured.lock().unwrap().clone();
+        let text = String::from_utf8_lossy(&raw);
+        let body_str = text.split("\r\n\r\n").nth(1).expect("has body");
+        let v: serde_json::Value = serde_json::from_str(body_str).expect("json body");
+        assert!(v["system"].is_array(), "large system must be block array: {}", v["system"]);
+        assert_eq!(v["system"][0]["type"], "text");
+        assert_eq!(v["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(v["system"][0]["text"], system);
+    }
+
+    #[tokio::test]
+    async fn turn_anthropic_small_system_stays_plain_string() {
+        let (port, captured) = spawn_mock_upstream_capture(anthropic_sse_resp()).await;
+        let out = stream_chat_turn_dispatch(
+            &format!("http://127.0.0.1:{port}"), "sk-ant", "claude-x", "anthropic",
+            "sys", "usr", 0.75, 1024, 30,
+            |_| true,
+            no_stop,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "");
+        let raw = captured.lock().unwrap().clone();
+        let text = String::from_utf8_lossy(&raw);
+        let body_str = text.split("\r\n\r\n").nth(1).expect("has body");
+        assert!(!body_str.contains("cache_control"), "small system must not attach cache_control");
+        let v: serde_json::Value = serde_json::from_str(body_str).expect("json body");
+        assert_eq!(v["system"], "sys");
+    }
 }
