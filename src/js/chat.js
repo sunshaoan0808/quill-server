@@ -23,6 +23,7 @@ import { SID_KEY, displayTitle, formatDateTime, uid } from './utils.js';
 import { switchTab, switchAzView, updateImmersive, exitImmersive } from './tabs_bridge.js';
 import { settings } from './state_core.js';
 import { stSwipe } from './tavern.js';
+import { extractUIBlocks, tryMountUiBlock } from './ui_blocks/index.js';
 
 /** Lazy accessor for the closure-published chat-state facade. */
 function __cs() {
@@ -348,6 +349,10 @@ function renderMessages(opts) {
     // S3c: 抽取检定块 → 检定卡；正文剥离该文本（检定结果以卡片呈现，不留纯文本）
     const checks = [];
     raw = extractCheckCards(raw, checks);
+    // UI 组件块：```deeix-ui 围栏抽出 → 渲染成交互卡片（DEEIX uicomponent 吞噬）
+    const uiExtracted = extractUIBlocks(raw);
+    raw = uiExtracted.cleanText;
+    const uiBlocks = uiExtracted.blocks;
     // Normalize: keep blank-line paragraphs; single \n inside a block stays soft break via <br> in one para
     const blocks = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split(/\n{2,}/);
     const paras = [];
@@ -366,6 +371,8 @@ function renderMessages(opts) {
       el.textContent = raw;
       el.classList.remove('has-paras');
       for (let k = 0; k < checks.length; k++) el.appendChild(buildCheckCard(checks[k]));
+      // 纯组件消息（正文被围栏抽干）也要挂卡
+      for (let k = 0; k < uiBlocks.length; k++) el.appendChild(tryMountUiBlock(uiBlocks[k]));
       return;
     }
     // Cheap equality: if same number of paras with same text, skip
@@ -380,7 +387,15 @@ function renderMessages(opts) {
         // S3c: 补挂缺失检定卡（正文相同但卡片节点可能未建）
         const have = el.querySelectorAll(':scope > .st-check-card').length;
         for (let k = have; k < checks.length; k++) el.appendChild(buildCheckCard(checks[k]));
-        return;
+        // UI 组件卡：正文相同但围栏内容可能已变（流式闭合瞬间）→ hash 不齐则全量重渲
+        const haveUi = el.querySelectorAll(':scope > .st-ui-block');
+        if (haveUi.length === uiBlocks.length) {
+          let uiSame = true;
+          for (let k = 0; k < uiBlocks.length; k++) {
+            if ((haveUi[k].dataset.hash || '') !== uiBlocks[k].hash) { uiSame = false; break; }
+          }
+          if (uiSame) return;
+        }
       }
     }
     el.textContent = '';
@@ -409,6 +424,10 @@ function renderMessages(opts) {
     // S3c: 追加检定卡（骰面/DC/结果徽章/结果文本）
     for (let k = 0; k < checks.length; k++) {
       el.appendChild(buildCheckCard(checks[k]));
+    }
+    // UI 组件卡（deeix-ui 围栏）
+    for (let k = 0; k < uiBlocks.length; k++) {
+      el.appendChild(tryMountUiBlock(uiBlocks[k]));
     }
   }
 
