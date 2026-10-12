@@ -10,6 +10,27 @@ use crate::llm_provider::{
 };
 use super::*;
 
+/// Anthropic prompt cache 最小可缓存长度（官方线：1024 token，低于此不生效）。
+pub(crate) const ANTHROPIC_MIN_CACHE_TOKENS: usize = 1024;
+
+/// Anthropic system 形态选择（吸收自 DEEIX openai_prompt_cache_policy 的
+/// 「按 route 能力挂缓存断点」思路）：
+/// - 估算 ≥ 1024 token → 作为单个 text 块并打 `cache_control: ephemeral`，
+///   让跨轮稳定的 system 前缀吃 prompt cache（省首 token 延迟 + 输入费）。
+/// - 低于阈值 → 保持旧的纯字符串形态，请求体零变化。
+/// 注意：缓存命中要求 system 前缀跨轮完全一致；system 每轮都变时无害（不命中而已）。
+pub(crate) fn anthropic_system_value(system: &str) -> Value {
+    if kaleido_core::memory_weaver::estimate_tokens(system) >= ANTHROPIC_MIN_CACHE_TOKENS {
+        json!([{
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }])
+    } else {
+        json!(system)
+    }
+}
+
 pub(crate) async fn stream_chat_turn_anthropic(
     base_url: &str,
     api_key: &str,
@@ -32,7 +53,7 @@ pub(crate) async fn stream_chat_turn_anthropic(
         "messages": [{"role": "user", "content": user}],
     });
     if !system.trim().is_empty() {
-        body["system"] = json!(system);
+        body["system"] = anthropic_system_value(system);
     }
     let resp = client
         .post(&url)

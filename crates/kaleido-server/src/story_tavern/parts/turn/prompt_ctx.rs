@@ -253,7 +253,10 @@ pub(crate) async fn build_turn_system_prompt(
         pack = %pack.id,
         "foreshadow preload",
     );
-    let mut system_prompt = build_tavern_system_prompt(&pack, &tavern, &chapter_body, &state.auth.data_root().cross_session_dir(), query_embedding, &mcp_tools, foreshadow_block.as_deref());
+    let system_prompt = build_tavern_system_prompt(&pack, &tavern, &chapter_body, &state.auth.data_root().cross_session_dir(), query_embedding, &mcp_tools, foreshadow_block.as_deref());
+    // CtxBudget（吸收自 DEEIX context_assembler）：后续所有注入块先收集为槽位，
+    // 统一按 token 预算组装（未触顶时与旧版逐字节一致；预算读 ServerConfig）。
+    let mut system_blocks: Vec<kaleido_core::context_budget::PromptSlot> = Vec::new();
     // Scribe 低语用完即清（本回合已注入 prompt；下回合由后台提取重写）
     if !tavern.scribe_whispers.is_empty() {
         tracing::info!(n = tavern.scribe_whispers.len(), "st scribe: whispers consumed");
@@ -264,7 +267,10 @@ pub(crate) async fn build_turn_system_prompt(
     {
         let style_block = crate::reference_library::ReferenceLibraryStore::new(state.auth.data_root().root()).injection_block();
         if !style_block.is_empty() {
-            system_prompt = format!("{}\n\n{}", system_prompt, style_block);
+            system_blocks.push(kaleido_core::context_budget::PromptSlot::new(
+                kaleido_core::context_budget::SlotKind::StyleGuide,
+                style_block,
+            ));
         }
     }
     // 吞噬资产接线（P0）: 账本/情感曲线/角色弧/关系演化注入 —— 全启发式零 LLM，
@@ -272,7 +278,10 @@ pub(crate) async fn build_turn_system_prompt(
     {
         let asset_block = preload_asset_blocks(&state, &pack, &tavern, &chapter_body);
         if let Some(ab) = asset_block {
-            system_prompt = format!("{}\n\n{}", system_prompt, ab);
+            system_blocks.push(kaleido_core::context_budget::PromptSlot::new(
+                kaleido_core::context_budget::SlotKind::AssetBlock,
+                ab,
+            ));
         }
     }
     // P1-3 (吞噬 denova outline 牵引): 原著剖析注入剧情 prompt —— 每回合给剧情模型原著素材，
@@ -280,10 +289,10 @@ pub(crate) async fn build_turn_system_prompt(
     {
         let outline_clip = read_outline_clip(state, pack, workspace_id);
         if !outline_clip.is_empty() {
-            system_prompt = format!(
-                "{}\n\n## 原著剖析（大纲产物，用于主线牵引）\n{}",
-                system_prompt, outline_clip
-            );
+            system_blocks.push(kaleido_core::context_budget::PromptSlot::new(
+                kaleido_core::context_budget::SlotKind::OutlineClip,
+                format!("## 原著剖析（大纲产物，用于主线牵引）\n{}", outline_clip),
+            ));
         }
     }
     // S4 (吞噬 denova director_plan): 导演计划生成指令（ST-26 指令）—— 调度命中时附加
@@ -317,7 +326,10 @@ pub(crate) async fn build_turn_system_prompt(
                 event_catalog
             ));
         }
-        system_prompt = format!("{}\n\n{}", system_prompt, inst);
+        system_blocks.push(kaleido_core::context_budget::PromptSlot::new(
+            kaleido_core::context_budget::SlotKind::DirectorInstruction,
+            inst,
+        ));
     }
 
     // S7 (P1-1): history vector recall — query session vector index with recent context,
@@ -396,7 +408,10 @@ pub(crate) async fn build_turn_system_prompt(
                                 let joined = lines.join("\n\n");
                                 let head = s7_recall_title(&joined);
                                 let recall = format!("{}\n{}", head, joined);
-                                system_prompt = format!("{}\n\n{}", system_prompt, recall);
+                                system_blocks.push(kaleido_core::context_budget::PromptSlot::new(
+                                    kaleido_core::context_budget::SlotKind::RecallNote,
+                                    recall,
+                                ));
                                 info!(session = %session_id, hits = candidates.len(), "S7 hybrid recall injected");
                             }
                         }
@@ -406,6 +421,22 @@ pub(crate) async fn build_turn_system_prompt(
                 }
             }
         }
+    }
+    // CtxBudget 组装：预算未触顶 → 与旧版逐字节一致；触顶 → 按优先级裁可选块。
+    let (system_prompt, trace) = kaleido_core::context_budget::assemble_system_prompt(
+        &system_prompt,
+        &system_blocks,
+        crate::config::ServerConfig::prompt_budget_tokens(),
+    );
+    if trace.had_trims() {
+        tracing::warn!(
+            session = %session_id,
+            budget = trace.budget_tokens,
+            total = trace.total_tokens,
+            kept = trace.kept_tokens,
+            trimmed = ?trace.trimmed,
+            "system prompt budget: trims applied"
+        );
     }
     system_prompt
 }

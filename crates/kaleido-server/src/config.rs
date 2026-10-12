@@ -50,6 +50,14 @@ impl ServerConfig {
         })
     }
 
+    /// system prompt 槽位预算（token）。0/缺省 = 关闭，行为与旧版逐字节一致。
+    /// 预算触顶时按 context_budget 优先级裁掉可选块（Base 永不裁）。
+    pub fn prompt_budget_tokens() -> usize {
+        Self::env_alias("KALEIDO_SYSTEM_PROMPT_BUDGET")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+
     /// Canonical data-root resolution — the ONLY place KALEIDO_DATA is read
     /// (legacy alias: MUSEAI_DATA).
     pub fn data_root() -> PathBuf {
