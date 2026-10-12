@@ -380,6 +380,29 @@
 .stui-tree-badge[data-tone='risk'] { background: rgba(255,123,123,.16); color: #ff9d9d; }
 .stui-tree-leaf { padding: 2px 0 2px 14px; font-size: 12.5px; opacity: .85; }
 
+
+
+/* chart */
+.stui-chart { width: 100%; min-height: 180px; }
+
+/* gantt */
+.stui-gantt-title { font-weight: 700; margin-bottom: 6px; }
+.stui-gantt-head { display: flex; align-items: flex-end; border-bottom: 1px solid var(--border, rgba(127,127,127,.25)); padding-bottom: 3px; margin-bottom: 3px; }
+.stui-gantt-namecell { flex: 0 0 108px; font-size: 11.5px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
+.stui-gantt-scale { position: relative; flex: 1 1 auto; height: 14px; }
+.stui-gantt-tick { position: absolute; bottom: 0; transform: translateX(-50%); font-size: 10px; opacity: .55; }
+.stui-gantt-body { position: relative; }
+.stui-gantt-group { font-size: 11.5px; font-weight: 700; opacity: .75; padding: 5px 0 2px; }
+.stui-gantt-row { display: flex; align-items: center; min-height: 24px; }
+.stui-gantt-row .stui-gantt-namecell { font-size: 12px; opacity: .9; }
+.stui-gantt-lane { position: relative; flex: 1 1 auto; height: 18px; background: linear-gradient(90deg, rgba(127,127,127,.06) 1px, transparent 1px) 0 0 / 10% 100%; border-radius: 4px; }
+.stui-gantt-bar { position: absolute; top: 2px; height: 14px; border-radius: 5px; background: color-mix(in srgb, var(--gantt-color, #4a9eff) 38%, transparent); border: 1px solid var(--gantt-color, #4a9eff); overflow: visible; }
+.stui-gantt-progress { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px 0 0 4px; background: var(--gantt-color, #4a9eff); opacity: .9; }
+.stui-gantt-tip { position: absolute; right: 4px; top: -1px; font-size: 10px; line-height: 16px; opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+.stui-gantt-bar:hover .stui-gantt-tip { opacity: 1; }
+.stui-gantt-milestone { position: absolute; top: 5px; width: 9px; height: 9px; transform: translateX(-50%) rotate(45deg); background: var(--gantt-color, #e8b84a); border: 1px solid rgba(255,255,255,.6); }
+.stui-gantt-lead { position: absolute; top: 8px; height: 0; border-top: 1px dashed rgba(127,127,127,.55); }
+
 /* error card */
 .stui-block-error-title { font-weight: 700; color: #ff9d9d; }
 .stui-block-error-reason { font-size: 12px; opacity: .8; margin-top: 3px; }

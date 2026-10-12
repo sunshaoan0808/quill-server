@@ -10,6 +10,9 @@
  * (crates/kaleido-core/src/ui_components.rs builtin_specs).
  */
 
+import { mountChart } from './chart.js';
+import { buildGantt } from './gantt.js';
+
 const registry = new Map();
 
 function reg(name, builder) {
@@ -271,6 +274,23 @@ reg('decision-tree', (props) => {
   if (!wrap.children.length) wrap.appendChild(el('div', 'stui-empty', '（空决策树）'));
   return wrap;
 });
+
+/* ---------- chart (lazy echarts) ---------- */
+
+reg('chart', (props) => {
+  const box = el('div', 'stui-chart');
+  box.style.height = '260px';
+  // lazy vendor chunk — never blocks the bubble; failure degrades to text
+  mountChart(box, props).catch((e) => {
+    box.textContent = '';
+    box.appendChild(buildUiBlockError(`图表加载失败: ${e && e.message}`, JSON.stringify(props).slice(0, 200)));
+  });
+  return box;
+});
+
+/* ---------- gantt ---------- */
+
+reg('gantt', (props) => buildGantt(props));
 
 /* ---------- error card (bad JSON / unknown component) ---------- */
 
