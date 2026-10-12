@@ -257,6 +257,20 @@ pub(crate) async fn build_turn_system_prompt(
     // CtxBudget（吸收自 DEEIX context_assembler）：后续所有注入块先收集为槽位，
     // 统一按 token 预算组装（未触顶时与旧版逐字节一致；预算读 ServerConfig）。
     let mut system_blocks: Vec<kaleido_core::context_budget::PromptSlot> = Vec::new();
+    // 吞噬 DEEIX uicomponent: 交互式组件目录（<catalog>）注入 —— env 开关，缺省零开销。
+    // 模型据此在回复正文里写 deeix-ui 围栏，前端渲染成可交互组件。
+    if crate::config::ServerConfig::ui_components_enabled() {
+        let catalog = kaleido_core::ui_components::catalog_prompt(
+            &kaleido_core::ui_components::builtin_components(),
+            kaleido_core::ui_components::BLOCK_FORMAT_LIVE,
+        );
+        if !catalog.is_empty() {
+            system_blocks.push(kaleido_core::context_budget::PromptSlot::new(
+                kaleido_core::context_budget::SlotKind::UiCatalog,
+                catalog,
+            ));
+        }
+    }
     // Scribe 低语用完即清（本回合已注入 prompt；下回合由后台提取重写）
     if !tavern.scribe_whispers.is_empty() {
         tracing::info!(n = tavern.scribe_whispers.len(), "st scribe: whispers consumed");

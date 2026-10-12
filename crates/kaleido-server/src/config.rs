@@ -58,6 +58,18 @@ impl ServerConfig {
             .unwrap_or(0)
     }
 
+    /// 交互式组件目录注入开关（吞噬 DEEIX uicomponent）。
+    /// `KALEIDO_UI_COMPONENTS=1|true` 开启；缺省关闭（RP 对话默认零开销）。
+    pub fn ui_components_enabled() -> bool {
+        match Self::env_alias("KALEIDO_UI_COMPONENTS") {
+            Some(v) => {
+                let v = v.trim();
+                v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")
+            }
+            None => false,
+        }
+    }
+
     /// Canonical data-root resolution — the ONLY place KALEIDO_DATA is read
     /// (legacy alias: MUSEAI_DATA).
     pub fn data_root() -> PathBuf {

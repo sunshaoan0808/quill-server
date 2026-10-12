@@ -34,6 +34,8 @@ pub enum SlotKind {
     DirectorInstruction,
     /// S7 语义召回的旧剧情片段。
     RecallNote,
+    /// 交互式组件目录（吞噬 DEEIX uicomponent 的 `<catalog>` 注入）。
+    UiCatalog,
 }
 
 impl SlotKind {
@@ -44,6 +46,7 @@ impl SlotKind {
             Self::DirectorInstruction => 90,
             Self::RecallNote => 80,
             Self::StyleGuide => 70,
+            Self::UiCatalog => 65,
             Self::OutlineClip => 60,
             Self::AssetBlock => 50,
         }
