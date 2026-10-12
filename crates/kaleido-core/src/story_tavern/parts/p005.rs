@@ -847,7 +847,9 @@ pub(super) mod tests {
                 },
             )
             .unwrap();
-        // 5 条消息：开场(0) + user(1) + asst(2) + user(3) + asst(4)
+        // 5 条消息：开场(0, create_from_pack seed) + user(1) + asst(2) + user(3) + asst(4) + asst(5)
+        // 注：create_from_pack 已 seed 1 条主线开场（seed_opening_if_needed），基线不是 0
+        let base_len = sess.messages.len(); // = 1（开场）
         for i in 0..5 {
             sess.messages.push(TavernMessage {
                 id: format!("msg-{i}"),
@@ -893,9 +895,9 @@ pub(super) mod tests {
         assert!(forked.current_worldline_id.is_some());
         assert!(forked.active_run_id.is_none());
         assert!(forked.turn_progress.is_none());
-        // 源会话不受影响
+        // 源会话不受影响（基线 = 开场 + 5 条，共 6）
         let src_after = sessions.get(&src_id).unwrap();
-        assert_eq!(src_after.messages.len(), 5);
+        assert_eq!(src_after.messages.len(), base_len + 5);
         assert_eq!(src_after.turn, 2);
         assert_eq!(src_after.checkpoints.len(), 2);
 
