@@ -302,3 +302,86 @@
 .st-pack-retry-btn { margin-top: var(--sp-2); }
 .st-pack-retry { display: block; margin-top: var(--sp-1); cursor: pointer; }
 .st-pack-loading-text { display: block; }
+
+/* ---------- UI 组件块（吞噬 DEEIX uicomponent） ----------
+   消息正文的 ```deeix-ui 围栏由 ui_blocks/ 渲染成交互卡片。 */
+.st-ui-block {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, rgba(127,127,127,.28));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel, #171a21) 92%, var(--accent, #4a9eff));
+  font-size: 13px;
+  line-height: 1.55;
+  overflow: hidden;
+}
+.st-ui-block.is-error { border-color: rgba(255,96,96,.5); }
+.stui-empty { opacity: .55; font-style: italic; }
+
+/* card-grid */
+.stui-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.stui-card { padding: 9px 10px; border: 1px solid var(--border, rgba(127,127,127,.22)); border-radius: 10px; background: rgba(127,127,127,.06); }
+.stui-card-icon { font-size: 18px; margin-bottom: 4px; }
+.stui-card-title { font-weight: 700; }
+.stui-card-sub { font-size: 12px; opacity: .65; margin-top: 1px; }
+.stui-card-body { font-size: 12.5px; opacity: .88; margin-top: 5px; white-space: pre-wrap; }
+.stui-card-fields { margin-top: 6px; display: grid; gap: 2px; }
+.stui-field { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.stui-field-label { opacity: .6; }
+.stui-field-value { font-weight: 600; text-align: right; }
+
+/* stat-grid */
+.stui-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.stui-stat { padding: 8px 10px; border-radius: 10px; background: rgba(127,127,127,.07); border: 1px solid var(--border, rgba(127,127,127,.2)); text-align: center; }
+.stui-stat-label { font-size: 11.5px; opacity: .65; }
+.stui-stat-value { font-size: 19px; font-weight: 800; margin-top: 2px; }
+.stui-stat-delta { font-size: 11.5px; margin-top: 1px; }
+.stui-stat-delta[data-dir='up'] { color: #47c97e; }
+.stui-stat-delta[data-dir='down'] { color: #ff7b7b; }
+.stui-stat-delta[data-dir='flat'] { opacity: .6; }
+
+/* data-table */
+.stui-table-title { font-weight: 700; margin-bottom: 6px; }
+.stui-table-wrap { overflow-x: auto; }
+.stui-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.stui-table th, .stui-table td { padding: 6px 8px; border-bottom: 1px solid var(--border, rgba(127,127,127,.18)); text-align: left; }
+.stui-table th { cursor: pointer; user-select: none; opacity: .8; white-space: nowrap; }
+.stui-table th:hover { opacity: 1; }
+.stui-table th[data-dir='asc']::after { content: ' ▲'; font-size: 9px; }
+.stui-table th[data-dir='desc']::after { content: ' ▼'; font-size: 9px; }
+.stui-table td.num { font-variant-numeric: tabular-nums; }
+.stui-table tbody tr:hover { background: rgba(127,127,127,.07); }
+
+/* quiz */
+.stui-quiz-q { font-weight: 700; margin-bottom: 7px; }
+.stui-quiz-options { display: grid; gap: 6px; }
+.stui-quiz-option { text-align: left; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border, rgba(127,127,127,.28)); background: rgba(127,127,127,.06); color: inherit; font-size: 13px; cursor: pointer; }
+.stui-quiz-option:hover:not(:disabled) { background: rgba(127,127,127,.13); }
+.stui-quiz-option:disabled { cursor: default; opacity: .85; }
+.stui-quiz-option.is-answer { border-color: rgba(71,201,126,.6); background: rgba(71,201,126,.14); }
+.stui-quiz-option.is-wrong { border-color: rgba(255,123,123,.55); background: rgba(255,123,123,.12); }
+.stui-quiz-exp { margin-top: 7px; font-size: 12.5px; opacity: .8; white-space: pre-wrap; }
+
+/* diff */
+.stui-diff-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.stui-diff-title { font-weight: 700; }
+.stui-diff-stat { font-size: 11.5px; font-variant-numeric: tabular-nums; opacity: .75; }
+.stui-diff-body { border: 1px solid var(--border, rgba(127,127,127,.2)); border-radius: 8px; overflow: hidden; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.stui-diff-line { display: flex; gap: 6px; padding: 2px 8px; white-space: pre-wrap; word-break: break-all; }
+.stui-diff-line.is-add { background: rgba(71,201,126,.13); }
+.stui-diff-line.is-del { background: rgba(255,123,123,.12); }
+.stui-diff-mark { flex: 0 0 10px; opacity: .55; }
+
+/* decision-tree */
+.stui-tree-node { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+.stui-tree-label { font-size: 12.5px; }
+.stui-tree-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: rgba(127,127,127,.14); }
+.stui-tree-badge[data-tone='ok'] { background: rgba(71,201,126,.18); color: #6fe3a0; }
+.stui-tree-badge[data-tone='risk'] { background: rgba(255,123,123,.16); color: #ff9d9d; }
+.stui-tree-leaf { padding: 2px 0 2px 14px; font-size: 12.5px; opacity: .85; }
+
+/* error card */
+.stui-block-error-title { font-weight: 700; color: #ff9d9d; }
+.stui-block-error-reason { font-size: 12px; opacity: .8; margin-top: 3px; }
+.stui-block-error-raw { margin: 6px 0 0; padding: 6px 8px; background: rgba(0,0,0,.25); border-radius: 6px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+
