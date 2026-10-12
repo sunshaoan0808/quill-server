@@ -190,10 +190,13 @@ pub(crate) async fn auth_middleware(State(state): State<AppState>, req: Request,
     let novels_get_public = method == Method::GET
         && (path == "/api/v1/crawler/novels"
             || path.starts_with("/api/v1/crawler/novels/"));
+    // 分享链接公开只读（吸收 DEEIX share）：GET + 精确前缀，token 校验在 handler 内。
+    let share_get_public = method == Method::GET && path.starts_with("/api/v1/story-tavern/share/");
     if matches!(
         path.as_str(),
         "/health" | "/api/v1/auth/login" | "/api/v1/public/info"
     ) || novels_get_public
+        || share_get_public
         || path.starts_with("/web")
         || path == "/"
         || path == "/index.html"

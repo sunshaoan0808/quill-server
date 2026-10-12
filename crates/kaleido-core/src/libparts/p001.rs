@@ -222,6 +222,10 @@ impl DataRoot {
     pub fn tavern_persona_dir(&self) -> PathBuf {
         self.root.join("tavern-persona")
     }
+    /// 会话分享快照（token 化，一个文件一个分享）。
+    pub fn tavern_shares_dir(&self) -> PathBuf {
+        self.root.join("tavern-shares")
+    }
 
     pub fn tavern_saves_dir(&self) -> PathBuf {
         self.root.join("tavern-saves")

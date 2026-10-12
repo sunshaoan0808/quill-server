@@ -62,3 +62,5 @@ use crate::state::StreamHub;
 
 mod parts;
 pub use parts::*;
+/// 会话分享链接（吸收 DEEIX conversation share）。
+pub mod share;

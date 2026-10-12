@@ -720,6 +720,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         // [主动关怀 P2 2026-10-11] 显式提醒创建/列表/取消（调度器在 main 启动期拉起）
         .merge(crate::proactive::router())
+        // 会话分享链接（吸收 DEEIX conversation share：快照式公开只读）
+        .merge(crate::story_tavern::share::router())
         .route(
             "/api/v1/story-tavern/packs",
             get(list_packs).post(upsert_pack),
