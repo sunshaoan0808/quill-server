@@ -582,6 +582,7 @@ export function parseExpression(source) {
   collectVariables(ast, names);
   return {
     source,
+    ast,
     variables: Array.from(names),
     evaluate: (scope) => evaluateNode(ast, scope),
   };
@@ -615,4 +616,179 @@ export function compileExpression(source) {
     variables: expression.variables,
     evaluate: (variables) => expression.evaluate(scopeFromRecord(variables)),
   };
+}
+
+// ---- LaTeX rendering (formula primitive, PR4 live panel) ----
+
+const LATEX_FUNCTIONS = {
+  sin: '\\sin', cos: '\\cos', tan: '\\tan',
+  asin: '\\arcsin', acos: '\\arccos', atan: '\\arctan',
+  sinh: '\\sinh', cosh: '\\cosh', tanh: '\\tanh',
+  ln: '\\ln', log: '\\ln', log10: '\\log_{10}', log2: '\\log_{2}',
+  exp: '\\exp', min: '\\min', max: '\\max',
+};
+const LATEX_CONSTANTS = { pi: '\\pi', e: 'e' };
+
+const GREEK = new Set([
+  'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa',
+  'lambda', 'mu', 'nu', 'xi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega',
+  'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Sigma', 'Phi', 'Psi', 'Omega',
+]);
+
+// `F_g` -> F_{g}, `v_0` -> v_{0}, `theta` -> \theta, `mass` -> \mathit{mass}.
+// Names are identifiers, so the result never contains model-written LaTeX.
+function variableLatex(name) {
+  const [base = name, ...rest] = name.split('_');
+  const head = GREEK.has(base) ? `\\${base}` : base.length > 1 ? `\\mathit{${base}}` : base;
+  const sub = rest.filter(Boolean).join(',');
+  if (!sub) return head;
+  return `${head}_{${GREEK.has(sub) ? `\\${sub}` : sub.length > 1 ? `\\mathrm{${sub}}` : sub}}`;
+}
+
+function formatLatexNumber(value) {
+  if (!Number.isFinite(value)) return '\\text{—}';
+  const abs = Math.abs(value);
+  if (abs !== 0 && (abs >= 1e15 || abs < 1e-4)) {
+    const [mantissa = '0', exponent = '0'] = value.toExponential(3).split('e');
+    return `${Number(mantissa)} \\times 10^{${Number(exponent)}}`;
+  }
+  const fixed = Number(value.toFixed(4)).toString();
+  const [whole = '0', fraction] = fixed.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, '{,}');
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
+
+function latexPrecedence(node) {
+  if (node.kind === 'binary') return BINARY_PRECEDENCE[node.op] ?? 0;
+  if (node.kind === 'unary') return 5.5;
+  return 10;
+}
+
+function wrapLatex(node, minPrecedence, values) {
+  const latex = nodeToLatex(node, values);
+  return latexPrecedence(node) < minPrecedence ? `\\left(${latex}\\right)` : latex;
+}
+
+function nodeToLatex(node, values) {
+  const wrap = (child, minPrecedence) => wrapLatex(child, minPrecedence, values);
+  const latex = (child) => nodeToLatex(child, values);
+  switch (node.kind) {
+    case 'literal':
+      if (typeof node.value !== 'number') throw new ExpressionError('only numeric formulas render as math');
+      return formatLatexNumber(node.value);
+    case 'var':
+      if (values && Object.hasOwn(values, node.name)) return `(${formatLatexNumber(values[node.name] ?? Number.NaN)})`;
+      return LATEX_CONSTANTS[node.name] ?? variableLatex(node.name);
+    case 'unary':
+      if (node.op !== '-') throw new ExpressionError('only numeric formulas render as math');
+      return `-${wrap(node.operand, 6)}`;
+    case 'binary': {
+      const precedence = BINARY_PRECEDENCE[node.op] ?? 0;
+      switch (node.op) {
+        case '/': return `\\frac{${latex(node.left)}}{${latex(node.right)}}`;
+        case '^': return `{${wrap(node.left, 10)}}^{${latex(node.right)}}`;
+        case '*': {
+          const right = wrap(node.right, precedence);
+          const substituted = node.right.kind === 'var' && values !== undefined && Object.hasOwn(values, node.right.name);
+          const glue = (node.right.kind === 'literal' || node.right.kind === 'unary') && !substituted ? ' \\cdot ' : ' ';
+          return `${wrap(node.left, precedence)}${glue}${right}`;
+        }
+        case '%': return `${wrap(node.left, precedence)} \\bmod ${wrap(node.right, precedence + 1)}`;
+        case '+': case '-': return `${wrap(node.left, precedence)} ${node.op} ${wrap(node.right, precedence + 1)}`;
+        default: throw new ExpressionError('only numeric formulas render as math');
+      }
+    }
+    case 'call': {
+      const args = node.args.map(latex);
+      switch (node.name) {
+        case 'sqrt': return `\\sqrt{${args[0] ?? ''}}`;
+        case 'cbrt': return `\\sqrt[3]{${args[0] ?? ''}}`;
+        case 'abs': return `\\left|${args[0] ?? ''}\\right|`;
+        case 'floor': return `\\lfloor ${args[0] ?? ''} \\rfloor`;
+        case 'ceil': return `\\lceil ${args[0] ?? ''} \\rceil`;
+        case 'pow': return `{${wrap(node.args[0] ?? { kind: 'literal', value: 0 }, 10)}}^{${args[1] ?? ''}}`;
+        default: {
+          const name = LATEX_FUNCTIONS[node.name] ?? `\\operatorname{${node.name}}`;
+          return `${name}\\left(${args.join(', ')}\\right)`;
+        }
+      }
+    }
+    default:
+      throw new ExpressionError('only numeric formulas render as math');
+  }
+}
+
+// LaTeX for display next to an editable formula.
+export function expressionToLatex(source) {
+  return nodeToLatex(parseExpression(source).ast);
+}
+
+// ---- Worked formulas (formula primitive) ----
+
+// `name = expr`, then the worked line `= (values) = result unit`. Built from
+// the parsed formula only, so no model-written LaTeX reaches the renderer.
+// `with` gives the value substituted for a name when it differs from the
+// block's (a slider in 10^24 kg): a number, or a formula of the block values.
+export function formulaToLatex(source, options = {}) {
+  const parsed = parseExpression(source);
+  const ast = parsed.ast;
+  if (!mayBeNumber(ast)) throw new ExpressionError('expected a numeric formula');
+  const name = options.name && /^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(options.name) ? `${variableLatex(options.name)} = ` : '';
+  const symbolic = `${name}${nodeToLatex(ast)}`;
+  const numbers = {};
+  const overrides = options.with !== null && typeof options.with === 'object' && !Array.isArray(options.with) ? options.with : {};
+  for (const variable of parsed.variables) {
+    const value = Object.hasOwn(overrides, variable)
+      ? overrideValue(overrides[variable], options.values ?? {})
+      : options.values?.[variable];
+    if (typeof value !== 'number' || !Number.isFinite(value)) return { symbolic };
+    Object.defineProperty(numbers, variable, { value, enumerable: true });
+  }
+  let result;
+  try {
+    const value = parsed.evaluate(scopeFromRecord(numbers));
+    if (typeof value !== 'number' || !Number.isFinite(value)) return { symbolic };
+    result = value;
+  } catch {
+    return { symbolic };
+  }
+  const digits = Math.min(6, Math.max(0, Math.round(options.precision ?? 2)));
+  const rounded = Number(result.toFixed(digits));
+  const unit = options.unit?.trim() ? `\\,${unitLatex(options.unit.trim().slice(0, 24))}` : '';
+  const steps = parsed.variables.length > 0 ? `= ${nodeToLatex(ast, numbers)} ` : '';
+  return { symbolic, worked: `${steps}= ${formatLatexNumber(rounded)}${unit}`, result };
+}
+
+function overrideValue(value, values) {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  const source = trimmed.startsWith('{') && trimmed.endsWith('}') ? trimmed.slice(1, -1) : trimmed;
+  try {
+    return parseExpression(source).evaluate(scopeFromRecord(values));
+  } catch {
+    return undefined;
+  }
+}
+
+// Plain unit strings (`N`, `m/s^2`, `kg*m/s^-1`) read as upright math;
+// anything else (`元/月`) is shown as text.
+function unitLatex(unit) {
+  if (/^[A-Za-z]+(\^-?\d)?([*/][A-Za-z]+(\^-?\d)?)*$/.test(unit)) {
+    return unit
+      .replace(/([A-Za-z]+)(?:\^(-?\d))?/g, (_, word, power) => `\\mathrm{${word}}${power ? `^{${power}}` : ''}`)
+      .replace(/\*/g, '\\cdot ');
+  }
+  return `\\text{${escapeLatexText(unit)}}`;
+}
+
+function escapeLatexText(text) {
+  return text.replace(/[\\{}$&#^_%~]/g, (char) => {
+    switch (char) {
+      case '\\': return '\\textbackslash{}';
+      case '^': return '\\textasciicircum{}';
+      case '~': return '\\textasciitilde{}';
+      default: return `\\${char}`;
+    }
+  });
 }

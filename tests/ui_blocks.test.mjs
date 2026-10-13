@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, it as test, expect } from 'vitest';
 import {
   extractUIBlocks,
@@ -6,7 +7,12 @@ import {
   replaceUIBlockFences,
   hashFenceBody,
 } from '../src/js/ui_blocks/fence.js';
-import { parseUiBlockSpec, rendererNames, hasRenderer } from '../src/js/ui_blocks/render.js';
+import { parseUiBlockSpec, rendererNames, hasRenderer, renderUiBlockBody } from '../src/js/ui_blocks/render.js';
+import {
+  parseBlockSource, compileBlock, resolveBlock, mergeState, stateDiff, readAction,
+} from '../src/js/ui_blocks/block.js';
+import { formulaToLatex } from '../src/js/ui_blocks/expression.js';
+import { mountLiveBlock } from '../src/js/ui_blocks/live.js';
 
 const CARD = '{"component":"card-grid","items":[{"title":"甲","body":"内容甲"}]}';
 const STAT = '{"component":"stat-grid","items":[{"label":"HP","value":"88"}]}';
@@ -28,11 +34,12 @@ describe('extractUIBlocks — deeix-ui 围栏抽取', () => {
     expect(cleanText).toBe(text);
   });
 
-  it('deeix-widget 围栏此阶段不抽（live PR 前留在正文）', () => {
+  it('deeix-widget 围栏也被抽取（沙箱 iframe 已落地）', () => {
     const text = '```deeix-widget\n<b>hi</b>\n```';
     const { cleanText, blocks } = extractUIBlocks(text);
-    expect(blocks).toHaveLength(0);
-    expect(cleanText).toBe(text);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].language).toBe('deeix-widget');
+    expect(cleanText).toBe('');
   });
 
   it('多块按序抽取，hash 稳定且内容变则 hash 变', () => {
@@ -363,5 +370,255 @@ describe('parseCurve', () => {
     expect(() => parseCurve('x^2 + y^2 = 25')).not.toThrow();
     expect(() => parseCurve('y = sin(x)')).not.toThrow();
     expect(() => parseCurve('y > 3')).toThrow();
+  });
+});
+
+
+// ---- live block engine (PR4) ----
+
+describe('live block: compile, state, resolve', () => {
+  const raw = JSON.stringify({
+    component: 'panel', title: '房贷',
+    state: { years: 15, mode: '等额本息' },
+    computed: { monthly: '20000 * (years/10)' },
+    children: [
+      { kind: 'stat', label: '年限', value: '{years}', unit: '年' },
+      { bind: 'years', component: 'slider', label: '年数', min: 1, max: 30 },
+      { kind: 'text', text: '月供 {monthly}' },
+      { component: 'button', label: '跑', set: { years: 20 } },
+      { component: 'formula', expr: '2 * pi * r' },
+      { component: 'select', bind: 'mode', options: ['等额本息', '等额本金'] },
+    ],
+  });
+
+  function compile(rawText) {
+    const parsed = parseBlockSource(rawText);
+    expect(parsed.status).toBe('ok');
+    return compileBlock(parsed.block, { streamComplete: true });
+  }
+
+  test('parses and compiles without issues', () => {
+    const compiled = compile(raw);
+    expect(compiled.issues).toEqual([]);
+    expect(compiled.initialState).toEqual({ years: 15, mode: '等额本息' });
+  });
+
+  test('resolved values: computed, templates, bind', () => {
+    const compiled = compile(raw);
+    const res = resolveBlock(compiled, compiled.initialState);
+    expect(res.values.monthly).toBe(30000);
+    expect(res.root.children[0].props.value).toBe(15);
+    expect(res.root.children[2].props.text).toBe('月供 30,000');
+    expect(res.root.children[1].props.state).toBe('years');
+    expect(res.root.children[1].bind).toBe('years');
+    expect(res.root.children[5].bind).toBe('mode');
+  });
+
+  test('state change recomputes downstream', () => {
+    const compiled = compile(raw);
+    const next = mergeState(compiled.initialState, { years: 20 });
+    expect(stateDiff(compiled.initialState, next)).toEqual({ years: 20 });
+    const res = resolveBlock(compiled, next);
+    expect(res.values.monthly).toBe(40000);
+    expect(res.root.children[0].props.value).toBe(20);
+  });
+
+  test('button action patches declared state', () => {
+    const compiled = compile(raw);
+    const res = resolveBlock(compiled, compiled.initialState);
+    const action = readAction(res.root.children[3].props, new Set(Object.keys(compiled.initialState)));
+    expect(action).toEqual({ kind: 'set', patch: { years: 20 } });
+  });
+
+  test('mergeState keeps shape and drops unknown keys', () => {
+    const compiled = compile(raw);
+    const merged = mergeState(compiled.initialState, { years: 25, ghost: 1, mode: 7 });
+    expect(merged.years).toBe(25);
+    expect(merged.ghost).toBeUndefined();
+    expect(merged.mode).toBe('等额本息'); // wrong shape falls back
+  });
+
+  test('bad JSON and wrong root are rejected', () => {
+    expect(parseBlockSource('{oops').status).toBe('invalid');
+    expect(parseBlockSource('[]').status).toBe('invalid');
+  });
+
+  test('circular computed is reported, not crashed', () => {
+    const compiled = compile(JSON.stringify({
+      component: 'panel',
+      state: { a: 1 },
+      computed: { x: 'y + 1', y: 'x + 1' },
+      children: [],
+    }));
+    const messages = compiled.issues.map((i) => i.message).join(' ');
+    expect(messages).toContain('circular');
+  });
+});
+
+// ---- LaTeX (formula primitive) ----
+
+describe('formulaToLatex', () => {
+  test('symbolic line with greek and functions', () => {
+    const latex = formulaToLatex('m * g', { name: 'F_g', values: {} });
+    expect(latex.symbolic).toBe('F_{g} = m g');
+  });
+
+  test('worked line substitutes the numbers', () => {
+    const latex = formulaToLatex('m * g', { values: { m: 9, g: 9.8 } });
+    expect(latex.worked).toBe('= (9) (9.8) = 88.2');
+  });
+
+  test('identifiers are variables, known functions stay symbols', () => {
+    const latex = formulaToLatex('sin(theta) / 2', { name: 'v', values: {} });
+    expect(latex.symbolic).toBe('v = \\frac{\\sin\\left(\\theta\\right)}{2}');
+  });
+
+  test('bad expression throws ExpressionError', () => {
+    expect(() => formulaToLatex('2 +', { values: {} })).toThrow();
+  });
+});
+
+
+// ---- live rendering (DOM) ----
+
+describe('mountLiveBlock', () => {
+  function mount(body) {
+    const host = document.createElement('div');
+    const instance = mountLiveBlock(JSON.stringify(body), host, { renderers: new Map() });
+    return { host, instance };
+  }
+
+  test('renders panel, stat, slider, text and formula', () => {
+    const { host, instance } = mount({
+      component: 'panel', title: '速度表',
+      state: { v: 12 },
+      computed: { t: '100 / v' },
+      children: [
+        { kind: 'stat', label: '速度', value: '{v}', unit: 'km/h' },
+        { bind: 'v', component: 'slider', min: 1, max: 200, label: '调速' },
+        { kind: 'text', text: '用时 {t}' },
+        { component: 'formula', expr: 'v * t', name: 'd' },
+      ],
+    });
+    expect(instance).toBeTruthy();
+    expect(host.querySelector('.dx-panel-title').textContent).toBe('速度表');
+    expect(host.querySelector('.dx-stat-value').textContent).toContain('12');
+    expect(host.querySelector('.dx-text').textContent).toBe('用时 8.33');
+    expect(host.querySelector('.dx-slider')).toBeTruthy();
+    expect(host.querySelector('.dx-formula-symbolic')).toBeTruthy();
+
+    // drag the slider: everything downstream recomputes
+    const slider = host.querySelector('.dx-slider');
+    slider.value = '100';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(host.querySelector('.dx-text').textContent).toBe('用时 1');
+  });
+
+  test('button action writes state; reset restores', () => {
+    const { host, instance } = mount({
+      component: 'panel',
+      state: { level: 1 },
+      children: [
+        { kind: 'stat', label: '档位', value: '{level}' },
+        { component: 'button', label: '升档', set: { level: 3 } },
+      ],
+    });
+    const button = host.querySelector('.dx-button');
+    button.click();
+    expect(host.querySelector('.dx-stat-value').textContent).toBe('3');
+    expect(instance.changed).toBe(true);
+    const reset = host.querySelector('.dx-reset');
+    expect(reset).toBeTruthy();
+    reset.click();
+    expect(host.querySelector('.dx-stat-value').textContent).toBe('1');
+  });
+
+  test('visible hides a child', () => {
+    const { host } = mount({
+      component: 'panel',
+      state: { on: false },
+      children: [
+        { kind: 'text', text: 'always' },
+        { kind: 'text', text: 'gated', visible: 'on' },
+      ],
+    });
+    const texts = [...host.querySelectorAll('.dx-text')].map((n) => n.textContent);
+    expect(texts).toContain('always');
+    expect(texts).not.toContain('gated');
+  });
+
+  test('tabs switch panels; callout tones render', () => {
+    const { host } = mount({
+      component: 'panel',
+      children: [
+        {
+          kind: 'tabs',
+          items: [
+            { label: '甲' }, { label: '乙' },
+          ],
+          children: [
+            { kind: 'text', text: 'AAA' },
+            { kind: 'text', text: 'BBB' },
+          ],
+        },
+        { kind: 'callout', tone: 'warning', title: '注意', text: '别忘了' },
+      ],
+    });
+    expect(host.querySelector('.dx-text').textContent).toBe('AAA');
+    const chips = host.querySelectorAll('.dx-chip');
+    chips[1].click();
+    expect(host.querySelector('.dx-text').textContent).toBe('BBB');
+    expect(host.querySelector('.dx-callout').className).toContain('dx-tone-warning');
+    expect(host.querySelector('.dx-callout-title').textContent).toBe('注意');
+  });
+
+  test('invalid body returns null', () => {
+    const host = document.createElement('div');
+    expect(mountLiveBlock('{broken', host, {})).toBeNull();
+  });
+});
+
+
+// ---- widget sandbox (PR4) ----
+
+describe('deeix-widget sandbox', () => {
+  test('widget fences extract alongside deeix-ui', () => {
+    const { cleanText, blocks } = extractUIBlocks(
+      'before\n```deeix-widget\n<p>hello widget</p>\n```\nafter',
+    );
+    expect(cleanText).toBe('before\n\nafter');
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].language).toBe('deeix-widget');
+    expect(blocks[0].rawBody).toBe('<p>hello widget</p>');
+  });
+
+  test('renderUiBlockBody builds a sandboxed iframe with the runtime', () => {
+    const node = renderUiBlockBody({
+      language: 'deeix-widget',
+      rawBody: '<div id="w">hi</div>',
+      normalizedBody: '<div id="w">hi</div>',
+      hash: 'abc',
+    });
+    expect(node.className).toBe('dx-widget-host');
+    const iframe = node.querySelector('iframe');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(iframe.srcdoc).toContain('<div id="w">hi</div>');
+    expect(iframe.srcdoc).toContain('window.quill');
+    expect(iframe.srcdoc).toContain('ask(text)');
+    expect(iframe.srcdoc).toContain('suggest(text)');
+    // no same-origin: the frame cannot touch the page
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
+  });
+
+  test('oversized widget is refused with a notice', () => {
+    const big = 'x'.repeat(200_001);
+    const node = renderUiBlockBody({
+      language: 'deeix-widget',
+      rawBody: big,
+      normalizedBody: big,
+      hash: 'big',
+    });
+    expect(node.querySelector('iframe')).toBeNull();
+    expect(node.textContent).toContain('过大');
   });
 });
