@@ -158,7 +158,7 @@ impl LooseOcrPayload {
 
 /// Parse an OCR HTTP body: JSON payloads by content type, plain text as a
 /// fallback (DEEIX `parseRemoteOCRResponse`).
-fn parse_ocr_body(body: &[u8], content_type: &str) -> Result<OcrResponse, OcrError> {
+pub(crate) fn parse_ocr_body(body: &[u8], content_type: &str) -> Result<OcrResponse, OcrError> {
     if content_type.to_ascii_lowercase().contains("application/json") {
         if let Ok(parsed) = serde_json::from_slice::<LooseOcrPayload>(body) {
             return parsed.into_response();
@@ -305,6 +305,26 @@ pub(crate) async fn run_extract(
     // Probe the category ourselves so orchestration can branch before the
     // builtin engine runs (DEEIX `upload/service.go` classification).
     let category = kaleido_core::extraction::probe_category(file_name, data);
+    // PR7 primary external engine (DEEIX `extractDocument`): Tika/Docling run
+    // first when configured and the category is supported; any failure
+    // demotes to builtin — the DEEIX documentParser → builtin fallback.
+    if let Some(ext) = crate::extract_external::resolve_external_engine() {
+        if ext.supports(category) {
+            let mime = mime_from_name(file_name);
+            let path = write_temp(data, file_name).await?;
+            let result = ext.extract(&path, mime, file_name).await;
+            cleanup(&path).await;
+            if let Ok(text) = result {
+                return Ok(json!({
+                    "text": text,
+                    "pageCount": 0,
+                    "engine": ext.name(),
+                    "ocrUsed": false,
+                }));
+            }
+            // External failed — fall through to the builtin chain below.
+        }
+    }
     // Image has no builtin engine — the decision layer routes it straight to
     // OCR (DEEIX `extractLocalFile` branches before touching a text engine).
     let native = if category == FileCategory::Image {
@@ -511,10 +531,18 @@ pub(crate) fn router() -> Router<crate::AppState> {
 }
 
 async fn extract_info() -> axum::Json<serde_json::Value> {
+    // PR7: report the configured primary engine and probe it only when it
+    // is configured (800ms budget, DEEIX `ProbeEndpoint`).
+    let primary = crate::extract_external::resolve_external_engine();
+    let (engine, external_probe) = match &primary {
+        Some(ext) => (ext.name(), Some(ext.probe().await)),
+        None => ("builtin", None),
+    };
     axum::Json(json!({
-        "engine": "builtin",
+        "engine": engine,
         "formats": ["docx", "pdf", "xlsx", "xls", "csv", "txt", "png", "jpg"],
         "ocr": RapidOcrHttp::from_env().is_some(),
+        "externalProbe": external_probe,
     }))
 }
 
