@@ -51,7 +51,7 @@ impl ExternalEngine {
                 FileCategory::Text
                     | FileCategory::Word
                     | FileCategory::Presentation
-                    | FileCategory::Spreadsheet
+                    | FileCategory::Excel
                     | FileCategory::Pdf
             ),
             ExternalEngine::Docling(_) => category == FileCategory::Pdf,
@@ -72,19 +72,24 @@ impl ExternalEngine {
 
     /// Health probe (DEEIX `ProbeEndpoint`): GET `/tika` or `/healthz`.
     pub(crate) async fn probe(&self) -> bool {
-        let url = match self {
-            ExternalEngine::Tika(c) => format!("{}/tika", c.base_url),
-            ExternalEngine::Docling(c) => DoclingClient::health_url(&c.base_url),
-        };
-        let client = match self {
-            ExternalEngine::Tika(c) => c,
-            ExternalEngine::Docling(c) => c,
-        };
-        let mut req = client.client.get(&url).timeout(Duration::from_millis(800));
-        if let Some(auth) = auth_header(&client.auth_token) {
-            req = req.header(reqwest::header::AUTHORIZATION, auth);
+        match self {
+            ExternalEngine::Tika(c) => {
+                let url = format!("{}/tika", c.base_url);
+                let mut req = c.client.get(&url).timeout(Duration::from_millis(800));
+                if let Some(auth) = auth_header(&c.auth_token) {
+                    req = req.header(reqwest::header::AUTHORIZATION, auth);
+                }
+                matches!(req.send().await, Ok(resp) if resp.status().is_success())
+            }
+            ExternalEngine::Docling(c) => {
+                let url = DoclingClient::health_url(&c.base_url);
+                let mut req = c.client.get(&url).timeout(Duration::from_millis(800));
+                if let Some(auth) = auth_header(&c.auth_token) {
+                    req = req.header(reqwest::header::AUTHORIZATION, auth);
+                }
+                matches!(req.send().await, Ok(resp) if resp.status().is_success())
+            }
         }
-        matches!(req.send().await, Ok(resp) if resp.status().is_success())
     }
 }
 
