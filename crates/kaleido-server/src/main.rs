@@ -126,6 +126,7 @@ mod tavern_mcp;
 // 生图 + TTS 工具端点（uniapi cogview-4 / edge-tts 等本机渠道）
 mod kaleido_tools;
 mod asr;
+mod extract_external;
 mod extract_ocr;
 // U10: 图像管线消费模块（bookcover / illustration / lore-image / image-presets）
 mod image_pipeline;
