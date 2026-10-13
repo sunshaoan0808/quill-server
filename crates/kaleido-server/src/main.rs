@@ -126,6 +126,7 @@ mod tavern_mcp;
 // 生图 + TTS 工具端点（uniapi cogview-4 / edge-tts 等本机渠道）
 mod kaleido_tools;
 mod asr;
+mod extract_ocr;
 // U10: 图像管线消费模块（bookcover / illustration / lore-image / image-presets）
 mod image_pipeline;
 // U14-M1: 文档评审锚点系统（段落级锚点 + 评论/反馈）
@@ -468,6 +469,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/kaleido-tools/image", post(crate::kaleido_tools::generate_image))
         .route("/api/v1/kaleido-tools/tts", post(crate::kaleido_tools::text_to_speech))
         .route("/api/v1/kaleido-tools/asr", post(crate::kaleido_tools::speech_to_text))
+        // PR6: document extraction + OCR fallback (DEEIX orchestration port)
+        .merge(extract_ocr::router())
         // U10: 图像管线消费（bookcover / illustration / lore-image / presets）
         .merge(image_pipeline::router())
         // Story Tavern ST-0
