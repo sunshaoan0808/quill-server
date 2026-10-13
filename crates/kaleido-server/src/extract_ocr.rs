@@ -315,12 +315,12 @@ pub(crate) async fn run_extract(
             let result = ext.extract(&path, mime, file_name).await;
             cleanup(&path).await;
             if let Ok(text) = result {
-                return Ok(json!({
+                return Ok(mark_success(json!({
                     "text": text,
                     "pageCount": 0,
                     "engine": ext.name(),
                     "ocrUsed": false,
-                }));
+                })));
             }
             // External failed — fall through to the builtin chain below.
         }
@@ -349,7 +349,7 @@ pub(crate) async fn run_extract(
     match decision {
         Decision::Done => {
             let doc = native.ok_or_else(|| internal_err_now())?;
-            Ok(json!({
+            Ok(mark_success(json!({
                 "text": doc.text,
                 "pageCount": doc.pages.len(),
                 "engine": doc.engine,
@@ -369,7 +369,7 @@ pub(crate) async fn run_extract(
             let result = ocr.extract_inner(&path, file_name, mime, &[]).await;
             cleanup(&path).await;
             let resp = result.map_err(ocr_err_to_status)?;
-            Ok(json!({
+            Ok(mark_success(json!({
                 "text": resp.text,
                 "pageCount": 1,
                 "engine": "ocr_image",
@@ -385,7 +385,7 @@ pub(crate) async fn run_extract(
             let result = ocr.extract_inner(&path, file_name, mime, &[]).await;
             cleanup(&path).await;
             let resp = result.map_err(ocr_err_to_status)?;
-            Ok(json!({
+            Ok(mark_success(json!({
                 "text": resp.text,
                 "pageCount": resp.rendered_pages.max(resp.pages.len()),
                 "engine": "ocr_full",
@@ -404,7 +404,7 @@ pub(crate) async fn run_extract(
             let ocr_by_page = index_ocr_pages(&resp.pages);
             let text = join_pages(&pages, Some(&ocr_by_page));
             let text = if text.trim().is_empty() { resp.text } else { text };
-            Ok(json!({
+            Ok(mark_success(json!({
                 "text": text,
                 "pageCount": pages.len().max(resp.pages.len()),
                 "engine": "builtin+ocr_selective",
