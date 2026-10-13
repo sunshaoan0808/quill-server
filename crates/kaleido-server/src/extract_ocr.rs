@@ -361,7 +361,7 @@ pub(crate) async fn run_extract(
                 "pageCount": doc.pages.len(),
                 "engine": doc.engine,
                 "ocrUsed": false,
-            }))
+            })))
         }
         Decision::Fail(code) => Err((
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -381,7 +381,7 @@ pub(crate) async fn run_extract(
                 "pageCount": 1,
                 "engine": "ocr_image",
                 "ocrUsed": true,
-            }))
+            })))
         }
         Decision::OcrFile => {
             let Some(ocr) = ocr else {
@@ -397,7 +397,7 @@ pub(crate) async fn run_extract(
                 "pageCount": resp.rendered_pages.max(resp.pages.len()),
                 "engine": "ocr_full",
                 "ocrUsed": true,
-            }))
+            })))
         }
         Decision::OcrCandidatePages(ranges) => {
             let Some(ocr) = ocr else {
@@ -417,7 +417,7 @@ pub(crate) async fn run_extract(
                 "engine": "builtin+ocr_selective",
                 "ocrUsed": true,
                 "ocrPages": encode_page_ranges(&ranges),
-            }))
+            })))
         }
     }
 }
