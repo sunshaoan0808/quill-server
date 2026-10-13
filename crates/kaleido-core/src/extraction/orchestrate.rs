@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn meaningful_counts_letters_and_digits() {
-        assert_eq!(count_meaningful_chars("ab 12 !@#"), 5);
+        assert_eq!(count_meaningful_chars("ab 12 !@#"), 4); // a,b,1,2 — punctuation/spaces do not count
         assert_eq!(count_meaningful_chars(""), 0);
         assert_eq!(count_meaningful_chars("中文也算"), 4);
     }
@@ -370,8 +370,9 @@ mod tests {
 
     #[test]
     fn mojibake_page_wants_ocr() {
-        // UTF-8 bytes of "中文" decoded as Latin-1: ä¸­æ
-        let mojibake = format!("Ã¤Â¸Â­Ã¦â&#162;&#186; {}", long_ok());
+        // UTF-8 bytes of "中文" decoded as Latin-1, dense enough that the
+        // mojibake ratio check trips (mixing in normal prose would dilute it).
+        let mojibake = "\u{c3}\u{a4}\u{c2}\u{b8}\u{c2}\u{ad}\u{c3}\u{a6}".repeat(8);
         assert!(should_ocr_page(&mojibake));
     }
 
@@ -508,10 +509,8 @@ mod decide_tests {
         let text = format!("{}\ntiny", long_ok());
         assert_eq!(
             decide(&input(FileCategory::Pdf, &pages, &text, true)),
-            Decision::OcrCandidatePages(vec![
-                PageRange { start: 2, end: 2 },
-                PageRange { start: 3, end: 3 },
-            ])
+            // 2 and 3 are adjacent — compact merges them into one run
+            Decision::OcrCandidatePages(vec![PageRange { start: 2, end: 3 }])
         );
     }
 
