@@ -270,7 +270,8 @@ mod tests {
 
     #[test]
     fn pdf_text_tightens_cjk_spacing() {
-        assert_eq!(normalize_extracted_pdf_text("你 好， 世 界"), "你好，世界");
+        // NFKC folds the fullwidth comma to ASCII, same as Go norm.NFKC.
+        assert_eq!(normalize_extracted_pdf_text("你 好， 世 界"), "你好,世界");
     }
 
     #[test]

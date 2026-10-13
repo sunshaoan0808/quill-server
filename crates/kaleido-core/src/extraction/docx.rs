@@ -53,9 +53,9 @@ fn parse_document_xml(xml: &str) -> Result<String, ExtractError> {
             .map_err(|e| ExtractError::Docx(e.to_string()))?;
         match event {
             Event::Start(e) => {
-                // Bind the QName: as_ref() borrows the temporary otherwise.
+                // QName borrows the event; keep it in a local binding.
                 let qname = e.name();
-                let name = local_name(qname.as_ref());
+                let name = qname.as_ref();
                 match name {
                     b"w:p" => {
                         para.get_or_insert_with(String::new);
@@ -93,7 +93,7 @@ fn parse_document_xml(xml: &str) -> Result<String, ExtractError> {
             }
             Event::Empty(e) => {
                 let qname = e.name();
-                let name = local_name(qname.as_ref());
+                let name = qname.as_ref();
                 match name {
                     b"w:tab" => {
                         if let Some(p) = para.as_mut() {
@@ -131,8 +131,7 @@ fn parse_document_xml(xml: &str) -> Result<String, ExtractError> {
                 }
             }
             Event::End(e) => {
-                let qname = e.name();
-                match local_name(qname.as_ref()) {
+                match e.name().as_ref() {
                 b"w:t" => in_text = false,
                 b"w:p" => {
                     if let Some(text) = para.take() {
@@ -170,14 +169,6 @@ fn parse_document_xml(xml: &str) -> Result<String, ExtractError> {
     }
 
     Ok(out.join("\n"))
-}
-
-/// Strip the namespace prefix: "w:p" -> "p".
-fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().position(|b| *b == b':') {
-        Some(i) => &name[i + 1..],
-        None => name,
-    }
 }
 
 #[cfg(test)]
