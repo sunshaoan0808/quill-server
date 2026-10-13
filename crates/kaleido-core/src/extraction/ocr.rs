@@ -6,7 +6,7 @@
 //! style services) lives in kaleido-server; core only defines the shape so
 //! orchestration tests can use a stub.
 
-use super::orchestrate::PageText;
+use super::PageText;
 
 /// One OCR engine's answer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
