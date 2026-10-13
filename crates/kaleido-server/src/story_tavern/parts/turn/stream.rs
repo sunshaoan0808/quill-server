@@ -385,7 +385,15 @@ pub(crate) async fn run_main_stream_phase(
             // 上游空响应重试 1 次（zen 池忙/限流时空流常见，实测 18s 后 empty response）。
             // 重试成功则继续走正常路径（质量管道 + 落盘）；仍空才走失败。
             // F3：重试复用同一 dispatch 入口 —— 相比旧内嵌简化解析，思维链/usage 也一并捕获。
+            //
+            // [吐字后绝不换路 2026-10-13] thinking 增量独立经 tx 推给前端（不计入
+            // full_text），所以 text 为空 ≠ 客户端没收到任何内容。若首轮已吐推理、
+            // 正文为空就重试，客户端会看到两段推理拼接（落盘却只有第二段）——
+            // 守卫：已吐任何增量（text 或 thinking）即禁止重试换路，空响应直接走
+            // 终态失败。协议解析器对每个发出的 delta 同步 append 到 outcome，
+            // 故 text/thinking 双空是「零发射」的精确判据。
             if !cancelled
+                && thinking_text.is_empty()
                 && !base_bg.trim().is_empty()
                 && !key_bg.trim().is_empty()
             {
