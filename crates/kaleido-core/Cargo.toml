@@ -22,4 +22,8 @@ rand = { workspace = true }
 ring = { workspace = true }
 lazy_static = { workspace = true }
 unicode-normalization = { workspace = true }
+# extraction builtin engines (PR5): xlsx/xls(calamine), docx XML(quick-xml), pdf(pdf-extract)
+calamine = { workspace = true }
+quick-xml = { workspace = true }
+pdf-extract = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }

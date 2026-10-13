@@ -112,6 +112,7 @@ pub use import_security::{
 pub mod image_metadata;
 pub use image_metadata::{read_raster_image_metadata, RasterImage, MAX_IMAGE_PIXELS};
 pub mod docx_security;
+pub mod extraction; // [文档抽取 PR5 2026-10-13] 内置 docx/xlsx/csv/pdf/txt 抽取，DEEIX 纪律直译
 pub use docx_security::validate_docx;
 pub mod prompt_safety;
 pub use st_import::{
