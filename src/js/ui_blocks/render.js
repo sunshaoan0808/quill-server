@@ -11,9 +11,12 @@
  */
 
 import { mountChart } from './chart.js';
+import { looksLikeLiveBlock, mountLiveBlock } from './live.js';
 import { buildGantt } from './gantt.js';
 import { buildCalculator } from './calculator.js';
 import { buildFunctionPlot } from './function-plot.js';
+import { renderWidget } from './widget.js';
+import { WIDGET_BLOCK_LANGUAGE_DEEIX } from './fence.js';
 
 const registry = new Map();
 
@@ -27,6 +30,12 @@ export function hasRenderer(name) {
 
 export function rendererNames() {
   return [...registry.keys()];
+}
+
+// The host (chat) registers how an `ask` button reaches the composer.
+let askHandler;
+export function setUiBlockAskHandler(fn) {
+  askHandler = typeof fn === 'function' ? fn : undefined;
 }
 
 /* ---------- shared helpers ---------- */
@@ -342,7 +351,26 @@ export function parseUiBlockSpec(block) {
  * Throws are caught by the caller via tryMountUiBlock.
  */
 export function renderUiBlockBody(block) {
+  // A widget: model-authored HTML in a sandboxed frame. Ask and suggest go to
+  // the composer, like a live block's buttons.
+  if (block.language === WIDGET_BLOCK_LANGUAGE_DEEIX) {
+    const holder = document.createElement('div');
+    holder.className = 'dx-widget-host';
+    renderWidget(block.rawBody, holder, { onAsk: askHandler, onSuggest: askHandler });
+    return holder;
+  }
   const { name, spec } = parseUiBlockSpec(block);
+  // A live block (state/computed/children) renders through the live engine:
+  // primitives, formulas and controls bound to declared state.
+  if (looksLikeLiveBlock(block.rawBody)) {
+    const holder = document.createElement('div');
+    holder.className = 'dx-live';
+    const instance = mountLiveBlock(block.rawBody, holder, {
+      renderers: registry,
+      ask: askHandler,
+    });
+    if (instance) return holder;
+  }
   const builder = registry.get(name);
   if (!builder) throw new Error(`unknown component "${name}"`);
   return builder(spec);

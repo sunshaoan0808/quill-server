@@ -17,8 +17,7 @@ export const UI_BLOCK_LANGUAGE_DEEIX = 'deeix-ui';
 export const WIDGET_BLOCK_LANGUAGE_DEEIX = 'deeix-widget';
 const SUPPORTED_BLOCK_LANGUAGES = new Set([
   UI_BLOCK_LANGUAGE_DEEIX,
-  // WIDGET_BLOCK_LANGUAGE_DEEIX: mounted in the live-panel PR (sandbox iframe);
-  // until then widget fences must stay in the text (not extracted, not swallowed).
+  WIDGET_BLOCK_LANGUAGE_DEEIX,
 ]);
 
 const FENCE_PATTERN = /```([A-Za-z0-9_+.-]*)[ \t]*\r?\n([\s\S]*?)\r?\n?```/g;

@@ -24,6 +24,7 @@ import { switchTab, switchAzView, updateImmersive, exitImmersive } from './tabs_
 import { settings } from './state_core.js';
 import { stSwipe } from './tavern.js';
 import { extractUIBlocks, tryMountUiBlock } from './ui_blocks/index.js';
+import { setUiBlockAskHandler } from './ui_blocks/render.js';
 
 /** Lazy accessor for the closure-published chat-state facade. */
 function __cs() {
@@ -820,7 +821,10 @@ function renderMessages(opts) {
   }
 
 
-  async function sendMessage(text) {
+  // UI-block `ask` buttons reach the composer through this path.
+setUiBlockAskHandler(sendMessage);
+
+async function sendMessage(text) {
     if (!text.trim() || __cs().streaming) return;
     const raw = String(text).trim();
     // // 前缀 → 剧情助手弹窗（对话模式共用，独立会话，不混入聊天流）
