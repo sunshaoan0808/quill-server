@@ -296,6 +296,13 @@ impl Default for ExtractOptions {
 
 /// Run one upload through the full DEEIX decision pipeline:
 /// probe → builtin engine → (PDF) selective OCR over suspect pages.
+fn mark_success(mut v: serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("extractSucceeded".into(), json!(true));
+    }
+    v
+}
+
 pub(crate) async fn run_extract(
     file_name: &str,
     data: &[u8],
