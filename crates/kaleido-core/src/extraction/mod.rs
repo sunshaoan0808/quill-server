@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 
 pub mod docx;
+pub mod ocr;
+pub mod orchestrate;
 pub mod normalize;
 pub mod pdf;
 pub mod sheet;
