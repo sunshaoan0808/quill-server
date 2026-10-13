@@ -18,9 +18,9 @@ use axum::Router;
 use kaleido_core::extraction::ocr::{normalize_ocr_text, OcrError, OcrResponse};
 use kaleido_core::extraction::orchestrate::{
     decide, encode_page_ranges, index_ocr_pages, join_pages, Decision, DecisionInput, PageRange,
-    PageText,
 };
-use kaleido_core::extraction::{extract_document, FileCategory};
+use kaleido_core::extraction::FileCategory;
+use kaleido_core::extraction::PageText;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -496,7 +496,12 @@ pub(crate) async fn extract_handler(
     let ocr = RapidOcrHttp::from_env();
     match run_extract(&file_name, &data, &opts, ocr.as_ref()).await {
         Ok(value) => axum::Json(value).into_response(),
-        Err((status, message)) => (status, axum::Json(axum::extract::RawJson(message))).into_response(),
+        Err((status, message)) => (
+            status,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            message,
+        )
+            .into_response(),
     }
 }
 
