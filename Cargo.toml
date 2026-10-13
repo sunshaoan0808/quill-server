@@ -42,6 +42,10 @@ regex = "1"
 # via rustls, so this adds no new crates to the lock.
 ring = "0.17"
 zip = { version = "8", default-features = false, features = ["deflate"] }
+# extraction (PR5 builtin engines): quick-xml 0.41 统一 calamine 内部同版本，避免双份进 lock
+quick-xml = "0.41"
+calamine = "0.36"
+pdf-extract = "0.12.1"
 
 
 # Faster CI builds on self-hosted runner (4-core). LTO off + more codegen units.
