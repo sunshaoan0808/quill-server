@@ -401,12 +401,15 @@ mod tests {
         let mut t1 = trig(ProactivePriority::Medium, "m0");
         t1.session_id = "tavern-session-a".into();
         t1.fire_at = Utc::now() - chrono::Duration::minutes(5); // 已到期
+        t1.allow_night = true; // 绕过夜间顺延,否则 CI 凌晨跑时 effective 延到 07:00 → due 扫描为空
         let mut t2 = trig(ProactivePriority::Low, "m0");
         t2.session_id = "tavern-session-a".into();
         t2.fire_at = Utc::now() + chrono::Duration::hours(1); // 未到期
+        t2.allow_night = true;
         let mut t3 = trig(ProactivePriority::High, "m0");
         t3.session_id = "tavern-session-b".into();
         t3.fire_at = Utc::now() - chrono::Duration::minutes(1);
+        t3.allow_night = true;
 
         store.upsert(t1.clone()).unwrap();
         store.upsert(t2.clone()).unwrap();
