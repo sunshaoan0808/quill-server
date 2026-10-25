@@ -1,0 +1,110 @@
+# Kaleido .gitignore
+node_modules/
+.hermes/
+*.pyc
+__pycache__/
+crates/kaleido-server/librust_out.rlib
+
+# Bookshelf test/probe files (not part of build)
+web/bookshelf/probe-*.js
+web/bookshelf/test-*.js
+web/bookshelf/test-*.xml
+web/bookshelf/test-*.json
+web/bookshelf/test-*.epub
+web/bookshelf/ui-smoke-*.js
+web/bookshelf/__pycache__/
+
+# Foliate-js vendor (vendored separately)
+web/foliate-js/
+
+# Novel workspace (user data)
+novel_workspace/
+
+# Build artifacts
+web/assets/index-*.js
+web/assets/index-*.css
+
+# Docs (generated)
+kaleido-audit-final2/
+tests/e2e/fixtures/ls_real.json
+tests/e2e/artifacts/
+
+# Rust build artifacts
+target/
+target-rust188/
+target-p3vasr/
+.cargo/config.toml
+
+# ASR venv (P3 audio duplex — faster-whisper local engine)
+.venv-asr/
+
+# Runtime data (never versioned; includes secrets/)
+data/
+
+graphify-out/
+
+# Agent task docs (parallel agent distil/opencode one-shot task sheets, progress, verify notes)
+.opencode-distil-task.md
+.opencode-distil-stage-resume-task.md
+.distil-progress.md
+DEPLOY_RESUME_VERIFY_*.md
+docs/TAVERN_DISTILL_REPORT_TASK.md
+docs/reports/
+target-rust188/
+
+# 运行时诊断产物(蒸馏排查用,不入库)
+/char-diag.json
+/roster-diag.json
+/roster-parse-fail.json
+/fffd-raw-dump.json
+**/fffd-raw-dump.json
+target
+_xiami_ref/
+.env.bak-20260815
+.env
+
+# agent harness temp files
+HARNESS_*.md
+*.bak
+.env.bak-*
+
+# stray local sqlite (never commit)
+sessions.db
+icons/henry* removed
+
+# ── P15/自由探索 增补：敏感与退役文件红线 ──────────────────────────────
+# 过时 .env 变体（含 LLM key / 凭据，绝不允许误推送）
+.env.pre-upgrade
+.env.bak-*
+.pre-upgrade-backup-*/
+
+# 二进制备份与打包（体积大 + 可能含敏感 env 快照）
+museai-server.bak-*
+web.bak-*.tar.gz
+*.rcgu.o
+rustc*/
+
+# 安全审计/一次性 push 说明（含内网拓扑与 token 事件记录）
+SECURITY_FIX_*.md
+PUSH_TO_BRANCH.md
+
+# 退役的 museai-* 三棵树（未被 git 跟踪的死副本，禁止再编辑/提交）
+crates/museai-core/
+crates/museai-harness/
+crates/museai-server/
+
+# 退役的 _*-part.js IIFE 片段（活模块是 wand.js 等 real ESM）
+src/js/_*-part.js
+
+# 退役的 IIFE 设置片段（同 _*-part.js 族）；活模块为 real ESM
+src/js/_settings-*.js
+
+# 退役的 MuseAI 旧名部署资产（active 为 kaleido-*）
+scripts/museai-*.py
+scripts/museai-*.sh
+scripts/museai-*.service
+
+# 工具缓存 + 运行时残留
+.cgr-*
+.venv-embed/
+scripts/embed-proxy.py

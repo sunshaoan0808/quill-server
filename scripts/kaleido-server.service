@@ -1,0 +1,40 @@
+# Kaleido Server — systemd service
+# Install: cp scripts/kaleido-server.service /etc/systemd/system/kaleido-server.service
+#          systemctl daemon-reload && systemctl enable --now kaleido-server
+#
+# Embed path (ST-21/22):
+#   PRIMARY  = in-process fastembed (KALEIDO_EMBED_INLINE=1 + local ONNX cache)
+#   FALLBACK = kaleido-embed-proxy :20145 when inline disabled/fails
+# Wants= (not Requires=) so proxy downtime does not block server start.
+
+[Unit]
+Description=Kaleido Server (Story Tavern + Chat)
+After=network-online.target kaleido-embed-proxy.service
+Wants=network-online.target kaleido-embed-proxy.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/museai-server
+Environment=KALEIDO_DATA=/root/museai-server/data
+Environment=LLM_MODEL=deepseek-v4-flash
+Environment=EMBEDDING_BASE_URL=http://127.0.0.1:20145
+Environment=KALEIDO_EMBED_INLINE=1
+Environment=KALEIDO_EMBED_CACHE=/root/museai-server/data/embed-cache
+Environment=KALEIDO_PORT=18766
+Environment=KALEIDO_HOST=0.0.0.0
+ExecStart=/root/museai-server/target/release/kaleido-server
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+
+# LLM credentials (chmod 600); project-local overrides are kept in the checkout:
+EnvironmentFile=-/root/.hermes/.env
+EnvironmentFile=-/root/museai-server/.env
+
+# Hardening — PrivateTmp hides /tmp/fastembed_cache; keep models under KALEIDO_DATA
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
